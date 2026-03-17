@@ -2,7 +2,12 @@
 #!POPCORN gpu MI355X
 
 """
-v200: Resubmit v188 baseline unchanged for fresh LB measurement.
+v199: .wt on M=256 quant scale stores (from .cg).
+
+fp4 stores already use .wt (v188). Scale stores still use .cg.
+Write-through pushes scales to L2 faster for ASM GEMM consumption.
+23+ BM tests confirm .wt improves M=256 by 0.8-3.1%.
+Only M=256 two-phase path affected.
 """
 import torch
 import triton
@@ -220,7 +225,7 @@ def _fused_mxfp4_quant_shuffle_kernel(
             bs_ptr + bs_offs,
             bs_e8m0.to(tl.uint8),
             mask=bs_mask,
-            cache_modifier=".cg",
+            cache_modifier=".wt",
         )
 
 

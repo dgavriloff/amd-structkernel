@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v144: 4-WG stage1 (256x32x128x128_1x4) + FlyDSL stage2 for bs=512/E=257.
-DSV3 tuned CSV uses 4-WG for token>=64 E=257. Try 4-WG with block_m=32
-combined with FlyDSL stage2 from v143 for this shape.
+v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
+Same approach that improved bs=512/E=33 significantly in v138.
+Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
 """
 import os
 import functools
@@ -57,12 +57,13 @@ _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
     "run_1stage": False,
 }
 
-# bs=128/E=33/d=512: cktile_moe gives 108us vs 124us baseline (-12.9%)
+# bs=128/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 (v150)
+# Same approach as bs=512/E=33 (v138). 4-WG M128 for better CU utilization.
 _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
-    "block_m": 64,
-    "ksplit": 2,
-    "kernelName1": "",
-    "kernelName2": "",
+    "block_m": 128,
+    "ksplit": 0,
+    "kernelName1": "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
+    "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic",
     "run_1stage": False,
 }
 

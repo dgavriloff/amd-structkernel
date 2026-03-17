@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
-Same approach that improved bs=512/E=33 significantly in v138.
-Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
+v149: CK 2-stage block_m=32 + FlyDSL stage2 t16x128x128 for bs=128/E=257/d=256.
+v148 failed with block_m=16 (quant kernel needs block_m%32==0). Use block_m=32
+with CK stage1 (1-WG default from CSV) + FlyDSL stage2.
 """
 import os
 import functools
@@ -57,13 +57,12 @@ _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
     "run_1stage": False,
 }
 
-# bs=128/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 (v150)
-# Same approach as bs=512/E=33 (v138). 4-WG M128 for better CU utilization.
+# bs=128/E=33/d=512: cktile_moe gives 108us vs 124us baseline (-12.9%)
 _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
-    "block_m": 128,
-    "ksplit": 0,
-    "kernelName1": "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
-    "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic",
+    "block_m": 64,
+    "ksplit": 2,
+    "kernelName1": "",
+    "kernelName2": "",
     "run_1stage": False,
 }
 
@@ -79,13 +78,14 @@ _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
     "run_1stage": False,
 }
 
-# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
-# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
+# bs=128/E=257/d=256: CK 2-stage + FlyDSL stage2 (v149)
+# Switch from cktile_moe ksplit=2 to CK 2-stage with FlyDSL atomic stage2.
+# block_m=32 (quant kernel requires block_m%32==0). Use default 1-WG CK stage1.
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
-    "block_m": 16,
-    "ksplit": 2,
+    "block_m": 32,
+    "ksplit": 0,
     "kernelName1": "",
-    "kernelName2": "",
+    "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic",
     "run_1stage": False,
 }
 
