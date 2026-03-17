@@ -2,10 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v201: M=64 waves_per_eu=2 (from 1) with .cg cache modifier preserved.
+v208: Revert fp4 stores from .wt to default (no modifier) for M=256 quant.
 
-v80 tested waves_per_eu=2 + cache_modifier=None together (confounded, neutral).
-waves_per_eu=2 alone with .cg has never been tested for M=64 specifically.
+v188 introduced .wt + gluon reduce together; testing if L2 residency helps ASM.
 """
 import torch
 import triton
@@ -186,10 +185,10 @@ def _fused_mxfp4_quant_shuffle_kernel(
         )
 
         if EVEN_M_N:
-            tl.store(x_fp4_ptr + out_offs, out_tensor, cache_modifier=".wt")
+            tl.store(x_fp4_ptr + out_offs, out_tensor)
         else:
             out_mask = (out_offs_m < M)[:, None] & (out_offs_n < (N // 2))[None, :]
-            tl.store(x_fp4_ptr + out_offs, out_tensor, mask=out_mask, cache_modifier=".wt")
+            tl.store(x_fp4_ptr + out_offs, out_tensor, mask=out_mask)
 
         # Store scales with inline shuffle permutation
         bs_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
