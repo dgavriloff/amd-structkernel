@@ -10,3 +10,4 @@
 {"action": "submit", "mode": "leaderboard", "v": 150, "score": 131.75, "best": 133.26, "kept": true, "ts": "2026-03-17T09:35:46.916783+00:00Z"}
 {"action": "propose", "what": "cktile_moe ksplit=4 for bs=128/E=257/d=256 (more K-parallelism)", "why": "bs=128/E=257 at 176us BM is weakest shape relative to reference. With d=256, K=7168 is large relative to expert dim. ksplit=4 gives more parallelism over K dimension. ksplit=2 works well for bs=16/E=257, maybe ksplit=4 better for bs=128.", "keywords": ["cktile", "ksplit4", "e257", "bs128"], "prior_matches": 0, "ts": "2026-03-17T09:36:28.142012+00:00Z"}
 {"action": "submit", "mode": "test", "v": 151, "result": "pass", "ts": "2026-03-17T09:41:39.994618+00:00Z"}
+{"action": "submit", "mode": "leaderboard", "v": 151, "score": 132.6, "best": 131.75, "kept": false, "ts": "2026-03-17T09:52:56.567593+00:00Z"}

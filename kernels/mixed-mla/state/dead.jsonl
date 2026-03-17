@@ -11,3 +11,4 @@
 {"technique": "bf16 persistent for kv=1024", "reason": "tolerance failures at page_size=16/32, regression at page_size=8", "count": 4}
 {"technique": "bf16_persist page_size=128 for kv>=4096", "reason": "Tolerance failure at all batch sizes including bs>=64 (v106). Sub-page kv_granularity=32 for bf16_persist is noise-neutral (v109).", "count": 1, "sessions": [7]}
 {"technique": "all-heads-per-program MXFP4 Triton", "reason": "Register pressure from [16,256] accumulators and masked row extraction tl.sum(acc*mask) makes all-heads ~10x slower than per-head", "count": 1, "sessions": [12]}
+{"technique": "multi-head-per-program", "reason": "Duplicating accumulators for 2+ heads causes massive register spill on MI355X, outweighing shared KV load savings", "count": 1, "sessions": [16]}

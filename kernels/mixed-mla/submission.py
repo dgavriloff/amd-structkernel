@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v118: MXFP4 K + bf16 V.
-- dot_scaled with MXFP4 for Q*K^T (hardware accelerated).
-- bf16 KV cache for V accumulation (native bf16 loads, no fp8 dequant).
-- Trades 2x V bandwidth for simpler load path and no int64 offsets.
-- Adaptive NSPLIT (8 for kv<=2048, 16 otherwise).
+v119: Micro-optimized v114 - hardcode sm_scale, inline constants.
+- Hardcode sm_scale as float literal (0.04166...) to avoid register use.
+- Keep MXFP4 K + FP8 V, adaptive NSPLIT (8/16).
+- Use int64 only where needed for fp8 offsets.
+- Inline V_DIM and reduce intermediate computations.
 """
 
 import torch
@@ -27,15 +27,15 @@ _cache = {}
 
 @triton.jit
 def _stage1(
-    Q, KV_pk, KV_sc, KV_bf16, kv_indptr, qo_indptr,
+    Q, KV_pk, KV_sc, KV_fp8, kv_indptr, qo_indptr,
     Mid_v, Mid_lse,
-    sm_scale,
+    fp8_scale,
     NSPLIT: tl.constexpr,
     BN: tl.constexpr,
     NHEADS: tl.constexpr,
     QK_DIM: tl.constexpr,
     V_DIM: tl.constexpr,
-    BF16_STRIDE: tl.constexpr,
+    FP8_STRIDE: tl.constexpr,
     PKD: tl.constexpr,
     N_SC: tl.constexpr,
     QK_P: tl.constexpr,
@@ -66,7 +66,6 @@ def _stage1(
         tl.store(Mid_v + v_off + ov, tl.zeros([V_DIM], dtype=tl.bfloat16))
         return
 
-    # Load Q for this head: [QK_P] bf16
     ok = tl.arange(0, QK_P)
     q_vec = tl.load(Q + qi * NHEADS * QK_DIM + hid * QK_DIM + ok,
                      mask=ok < QK_DIM, other=0.0)
@@ -74,6 +73,7 @@ def _stage1(
     m_i = float("-inf")
     l_i = 0.0
     acc_v = tl.zeros([V_DIM], dtype=tl.float32)
+    ov = tl.arange(0, V_DIM)
 
     for blk_s in range(ss, se, BN):
         bn = tl.minimum(BN, se - blk_s)
@@ -81,7 +81,6 @@ def _stage1(
         nm = on < bn
         kg = kv_s + blk_s + on
 
-        # K packed [BN, PKD_P], K scale [BN, NSC_P] -- MXFP4
         opk = tl.arange(0, PKD_P)
         kp = tl.load(KV_pk + kg[:, None] * PKD + opk[None, :],
                       mask=nm[:, None] & (opk[None, :] < PKD), other=0)
@@ -89,16 +88,13 @@ def _stage1(
         ks = tl.load(KV_sc + kg[:, None] * N_SC + osc[None, :],
                       mask=nm[:, None] & (osc[None, :] < N_SC), other=127)
 
-        # Score: [1, QK_P] @ [PKD_P, BN] -> [1, BN]
-        q_2d = q_vec[None, :]
         kpt = tl.trans(kp)
-        scores_2d = tl.dot_scaled(q_2d.to(tl.bfloat16), None, "bf16",
+        scores_2d = tl.dot_scaled(q_vec[None, :].to(tl.bfloat16), None, "bf16",
                                    kpt, ks, "e2m1")
         scores = tl.reshape(scores_2d, [BN])
-        scores = scores * sm_scale
+        scores = scores * 0.041666666666666664  # 1/24 = 1/sqrt(576)
         scores = tl.where(nm, scores, float("-inf"))
 
-        # Online softmax
         m_ij = tl.max(scores, axis=0)
         m_new = tl.maximum(m_i, m_ij)
         alpha = tl.exp(m_i - m_new)
@@ -106,20 +102,16 @@ def _stage1(
         l_i = l_i * alpha + tl.sum(p, axis=0)
         acc_v = acc_v * alpha
 
-        # V from bf16 KV cache: load [BN, V_DIM] bf16
-        ov = tl.arange(0, V_DIM)
-        v_bf16 = tl.load(KV_bf16 + kg[:, None] * BF16_STRIDE + ov[None, :],
-                          mask=nm[:, None], other=0.0)
-        v_f32 = v_bf16.to(tl.float32)
+        fp8_offsets = (kg[:, None] * FP8_STRIDE + ov[None, :]).to(tl.int64)
+        vfp8 = tl.load(KV_fp8 + fp8_offsets,
+                        mask=nm[:, None], other=0.0)
+        v_f32 = vfp8.to(tl.float32) * fp8_scale
 
-        # V accum: p[BN] @ V[BN, V_DIM] -> [V_DIM]
         acc_v += tl.sum(p[:, None] * v_f32, axis=0)
         m_i = m_new
 
     inv_l = 1.0 / l_i
     tl.store(Mid_lse + lse_off, m_i + tl.log(l_i))
-
-    ov = tl.arange(0, V_DIM)
     tl.store(Mid_v + v_off + ov, (acc_v * inv_l).to(tl.bfloat16))
 
 
@@ -160,7 +152,6 @@ def custom_kernel(data: input_t) -> output_t:
     bs = config["batch_size"]
     tq = q.shape[0]
 
-    # MXFP4 for K (dot_scaled)
     kv_pk_raw, kv_sc_raw = kv_data["mxfp4"]
     kv_pk = kv_pk_raw.view(torch.uint8) if kv_pk_raw.dtype != torch.uint8 else kv_pk_raw
     kv_sc = kv_sc_raw.view(torch.uint8) if kv_sc_raw.dtype != torch.uint8 else kv_sc_raw
@@ -169,14 +160,14 @@ def custom_kernel(data: input_t) -> output_t:
     if kv_sc.dim() > 2:
         kv_sc = kv_sc.reshape(kv_sc.shape[0], -1)
 
-    # BF16 KV cache for V
-    kv_bf16 = kv_data["bf16"].reshape(kv_data["bf16"].shape[0], -1)
+    kv_fp8_raw, kv_fp8_scale = kv_data["fp8"]
+    kv_fp8 = kv_fp8_raw.view(torch.float8_e4m3fnuz).reshape(kv_fp8_raw.shape[0], -1)
+    fp8_scale_val = kv_fp8_scale.item() if kv_fp8_scale.numel() == 1 else 1.0
 
     PKD = kv_pk.shape[-1]
     N_SC = kv_sc.shape[-1]
-    BF16_STRIDE = kv_bf16.shape[-1]
+    FP8_STRIDE = kv_fp8.shape[-1]
 
-    # Adaptive NSPLIT
     max_kv = int(kv_indptr[-1].item() - kv_indptr[0].item()) // max(bs, 1)
     if max_kv <= 2048:
         NSPLIT = 8
@@ -190,13 +181,13 @@ def custom_kernel(data: input_t) -> output_t:
     o = torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
 
     _stage1[(bs * NSPLIT * NUM_HEADS,)](
-        q.view(-1, NUM_HEADS, QK_HEAD_DIM), kv_pk, kv_sc, kv_bf16,
+        q.view(-1, NUM_HEADS, QK_HEAD_DIM), kv_pk, kv_sc, kv_fp8,
         kv_indptr, qo_indptr,
         mid_v, mid_lse,
-        SM_SCALE,
+        fp8_scale_val,
         NSPLIT=NSPLIT, BN=BN, NHEADS=NUM_HEADS,
         QK_DIM=QK_HEAD_DIM, V_DIM=V_HEAD_DIM,
-        BF16_STRIDE=BF16_STRIDE,
+        FP8_STRIDE=FP8_STRIDE,
         PKD=PKD, N_SC=N_SC,
         QK_P=QK_PAD, PKD_P=PKD_PAD, NSC_P=NSC_PAD,
         num_warps=4, num_stages=2,

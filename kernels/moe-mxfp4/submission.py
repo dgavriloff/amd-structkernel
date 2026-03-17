@@ -2,8 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v151: cktile_moe ksplit=4 for bs=128/E=257/d=256.
-More K-parallelism for the weakest E=257 shape. K=7168 large enough for 4-way split.
+v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
+Same approach that improved bs=512/E=33 significantly in v138.
+Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
 """
 import os
 import functools
@@ -78,11 +79,11 @@ _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
     "run_1stage": False,
 }
 
-# bs=128/E=257/d=256: cktile_moe ksplit=4 (v151)
-# More K-parallelism for weakest E=257 shape. K=7168 large enough for 4-way split.
+# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
+# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
     "block_m": 16,
-    "ksplit": 4,
+    "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",
     "run_1stage": False,
