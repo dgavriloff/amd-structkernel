@@ -2,9 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
-Same approach that improved bs=512/E=33 significantly in v138.
-Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
+v159: block_m=64 for bs=128/E=33/d=512 (was block_m=128).
+With ~3.9 tokens/expert, block_m=128 causes heavy padding. block_m=64 halves padding.
 """
 import os
 import functools
@@ -58,9 +57,9 @@ _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
 }
 
 # bs=128/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 (v150)
-# Same approach as bs=512/E=33 (v138). 4-WG M128 for better CU utilization.
+# v159: block_m=64 to reduce padding waste with ~3.9 tokens/expert
 _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
-    "block_m": 128,
+    "block_m": 64,
     "ksplit": 0,
     "kernelName1": "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
     "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic",
