@@ -16,3 +16,4 @@
 {"action": "submit", "mode": "test", "v": 117, "result": "pass", "ts": "2026-03-17T09:26:22.383296+00:00Z"}
 {"action": "submit", "mode": "leaderboard", "v": 117, "score": 31.84, "best": 19.19, "kept": false, "ts": "2026-03-17T09:31:54.428962+00:00Z"}
 {"action": "propose", "what": "Use bf16 KV cache for V instead of FP8, avoiding fp8 dequant and int64 offset overhead", "why": "FP8 V loads require int64 offset computation (expensive on AMD) and fp8->f32 conversion. bf16 V loads use native bf16 pointer arithmetic and no conversion. Trade 2x bandwidth for simpler load path. For small/medium batches, the latency savings from simpler loads may outweigh bandwidth cost.", "keywords": ["bf16-v", "native-loads", "no-int64", "simpler-path"], "prior_matches": 0, "ts": "2026-03-17T09:34:44.918449+00:00Z"}
+{"action": "submit", "mode": "test", "v": 118, "result": "pass", "ts": "2026-03-17T09:41:22.495526+00:00Z"}

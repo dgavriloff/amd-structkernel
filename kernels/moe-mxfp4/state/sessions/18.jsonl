@@ -7,3 +7,6 @@
 {"action": "submit", "mode": "leaderboard", "v": 149, "score": 134.44, "best": 133.26, "kept": false, "ts": "2026-03-17T09:23:41.022511+00:00Z"}
 {"action": "propose", "what": "4-WG stage1 + FlyDSL stage2 for bs=128/E=33/d=512 with block_m=128", "why": "bs=512/E=33/d=512 improved significantly with 4-WG M128 + FlyDSL (v138). bs=128 with ~4.5 tokens/expert could also benefit from the same approach vs cktile_moe ksplit=2 block_m=64.", "keywords": ["4-wg", "stage1", "e33", "bs128", "flydsl"], "prior_matches": 0, "ts": "2026-03-17T09:24:00.405292+00:00Z"}
 {"action": "submit", "mode": "test", "v": 150, "result": "pass", "ts": "2026-03-17T09:28:08.881512+00:00Z"}
+{"action": "submit", "mode": "leaderboard", "v": 150, "score": 131.75, "best": 133.26, "kept": true, "ts": "2026-03-17T09:35:46.916783+00:00Z"}
+{"action": "propose", "what": "cktile_moe ksplit=4 for bs=128/E=257/d=256 (more K-parallelism)", "why": "bs=128/E=257 at 176us BM is weakest shape relative to reference. With d=256, K=7168 is large relative to expert dim. ksplit=4 gives more parallelism over K dimension. ksplit=2 works well for bs=16/E=257, maybe ksplit=4 better for bs=128.", "keywords": ["cktile", "ksplit4", "e257", "bs128"], "prior_matches": 0, "ts": "2026-03-17T09:36:28.142012+00:00Z"}
+{"action": "submit", "mode": "test", "v": 151, "result": "pass", "ts": "2026-03-17T09:41:39.994618+00:00Z"}
