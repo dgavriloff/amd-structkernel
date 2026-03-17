@@ -1,5 +1,5 @@
 #!/bin/bash
-# Kill the tmux session for a kernel session and record the result.
+# Kill the tmux session for a kernel session, record the result, and notify the orchestrator.
 # Usage: ./orchestrator/end-codex-subagent.sh --kernel-dir <dir> --session-id <id>
 
 set -euo pipefail
@@ -20,6 +20,8 @@ if [ -z "$KERNEL_DIR" ] || [ -z "$SESSION_ID" ]; then
     exit 2
 fi
 
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+KERNEL_NAME="$(basename "$KERNEL_DIR")"
 STATE_FILE="$KERNEL_DIR/state/subagents.jsonl"
 if [ ! -f "$STATE_FILE" ]; then
     exit 0
@@ -82,3 +84,12 @@ print(json.dumps({
     "ts": datetime.datetime.now(datetime.UTC).isoformat() + "Z",
 }))
 PY
+
+if [ -x "$REPO_DIR/orchestrator/notify-orchestrator.sh" ]; then
+    "$REPO_DIR/orchestrator/notify-orchestrator.sh" \
+        --kernel "$KERNEL_NAME" \
+        --session-id "$SESSION_ID" \
+        --event close \
+        --reason "$reason" \
+        >/dev/null 2>&1 || true
+fi
