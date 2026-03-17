@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v138: FlyDSL t16x128x128_atomic stage2 for BOTH d=512 AND d=2048.
-tile_m=16 helps both shapes. d=512: 126->112us (-11%) in v137 BM.
-d=2048: noise-level parity in v136. Combined for cumulative BM improvement.
+v143: FlyDSL stage2 t16x128x128_atomic for bs=512/E=257/d=256.
+Replace CK stage2 with FlyDSL atomic stage2 for this shape.
+Keep CK stage1 + NT=True for stage1 (heuristic path).
 """
 import os
 import functools
@@ -118,16 +118,17 @@ _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
     "run_1stage": False,
 }
 
-# === bs=512/E=257: inject tuned CSV kernels + NT=True ===
-# Heuristic says NT=True for 17 tokens/expert, but tuned CSV path always sets NT=False.
-# Inject the same kernel names as tuned CSV but add use_non_temporal_load flag.
+# === bs=512/E=257: CK stage1 + FlyDSL stage2 + NT=True ===
+# v143: Replace CK stage2 with FlyDSL t16x128x128_atomic stage2.
+# FlyDSL atomic stage2 with tile_m=16 has shown improvements for E=33 shapes.
+# Keep CK stage1 from tuned CSV. NT=True via monkeypatch on stage1.
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "block_m": 32,
     "ksplit": 0,
     "kernelName1": "moe_ck2stages_gemm1_64x32x32x128_1x1_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
-    "kernelName2": "moe_ck2stages_gemm2_64x32x32x128_1x1_MulABScaleExpertWeightShuffled_v1_Nswizzle0_Quant3_MulRoutedWeight1_FP4X2_FP4X2_B16",
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v143: FlyDSL stage2 instead of CK
     "run_1stage": False,
-    "use_non_temporal_load": True,  # custom flag, read by monkeypatch
+    "use_non_temporal_load": True,
 }
 
 _injected = False

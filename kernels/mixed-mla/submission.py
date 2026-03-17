@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v112: MXFP4 Triton v3: tl.dot for V accum, all 16 heads per program.
-Grid: (batch * num_splits). Each program handles all 16 heads.
-Uses tl.dot for V accumulation: p[16,BN] @ V[BN,V_PKD] instead of scalar sum.
-dot_scaled for Q*K^T, manual dequant for V, tl.dot for V accum.
+v111: MXFP4 Triton kernel v2 - per-head processing, optimized dequant.
+Grid: (batch * num_splits * num_heads). Each program handles one (batch, split, head).
+V dequant uses arithmetic fp4 e2m1 decode instead of nested tl.where.
+dot_scaled for Q*K^T, manual dequant + reduction for V accumulation.
 """
 
 import torch
@@ -25,6 +25,28 @@ _cache = {}
 
 
 @triton.jit
+def _fp4_dequant(packed, scale_f32):
+    """Dequant packed uint8 fp4x2. Returns (lo_val, hi_val) fp32."""
+    lo_raw = (packed & 0xF).to(tl.int32)
+    hi_raw = (packed >> 4).to(tl.int32)
+    lo_mag = lo_raw & 7
+    hi_mag = hi_raw & 7
+    lo_e = lo_mag >> 1
+    lo_m = lo_mag & 1
+    lo_val = tl.where(lo_e == 0,
+                      lo_m.to(tl.float32) * 0.5,
+                      tl.exp2((lo_e - 1).to(tl.float32)) * (1.0 + lo_m.to(tl.float32) * 0.5))
+    lo_val = tl.where(lo_raw >= 8, -lo_val, lo_val) * scale_f32
+    hi_e = hi_mag >> 1
+    hi_m = hi_mag & 1
+    hi_val = tl.where(hi_e == 0,
+                      hi_m.to(tl.float32) * 0.5,
+                      tl.exp2((hi_e - 1).to(tl.float32)) * (1.0 + hi_m.to(tl.float32) * 0.5))
+    hi_val = tl.where(hi_raw >= 8, -hi_val, hi_val) * scale_f32
+    return lo_val, hi_val
+
+
+@triton.jit
 def _stage1(
     Q, KV_pk, KV_sc, kv_indptr, qo_indptr,
     Mid_lo, Mid_hi, Mid_lse,
@@ -40,10 +62,11 @@ def _stage1(
     PKD_P: tl.constexpr,
     NSC_P: tl.constexpr,
 ):
-    # Grid: (batch * NSPLIT,)
     pid = tl.program_id(0)
-    sid = pid % NSPLIT
-    bid = pid // NSPLIT
+    hid = pid % NHEADS
+    pid2 = pid // NHEADS
+    sid = pid2 % NSPLIT
+    bid = pid2 // NSPLIT
 
     kv_s = tl.load(kv_indptr + bid)
     kv_e = tl.load(kv_indptr + bid + 1)
@@ -54,29 +77,25 @@ def _stage1(
     ss = sid * per_split
     se = tl.minimum(ss + per_split, kv_len)
 
-    obase_lse = (qi * NSPLIT + sid) * NHEADS
-    obase_v = obase_lse * V_PKD
-
-    oh = tl.arange(0, NHEADS)
+    lse_off = (qi * NSPLIT + sid) * NHEADS + hid
+    v_off = lse_off * V_PKD
 
     if ss >= kv_len:
-        tl.store(Mid_lse + obase_lse + oh, tl.full([NHEADS], float("-inf"), dtype=tl.float32))
+        tl.store(Mid_lse + lse_off, float("-inf"))
         ov = tl.arange(0, V_PKD)
-        for h in tl.static_range(NHEADS):
-            mask_h = (oh == h)[:, None]
-            tl.store(Mid_lo + obase_v + h * V_PKD + ov, tl.zeros([V_PKD], dtype=tl.float32))
-            tl.store(Mid_hi + obase_v + h * V_PKD + ov, tl.zeros([V_PKD], dtype=tl.float32))
+        tl.store(Mid_lo + v_off + ov, tl.zeros([V_PKD], dtype=tl.float32))
+        tl.store(Mid_hi + v_off + ov, tl.zeros([V_PKD], dtype=tl.float32))
         return
 
-    # Load Q [NHEADS, QK_P] bf16
+    # Load Q for this head: [QK_P] bf16
     ok = tl.arange(0, QK_P)
-    qb = tl.load(Q + qi * NHEADS * QK_DIM + oh[:, None] * QK_DIM + ok[None, :],
-                  mask=ok[None, :] < QK_DIM, other=0.0)  # [NHEADS, QK_P]
+    q_vec = tl.load(Q + qi * NHEADS * QK_DIM + hid * QK_DIM + ok,
+                     mask=ok < QK_DIM, other=0.0)
 
-    m_i = tl.full([NHEADS], float("-inf"), dtype=tl.float32)
-    l_i = tl.zeros([NHEADS], dtype=tl.float32)
-    acc_lo = tl.zeros([NHEADS, V_PKD], dtype=tl.float32)
-    acc_hi = tl.zeros([NHEADS, V_PKD], dtype=tl.float32)
+    m_i = float("-inf")
+    l_i = 0.0
+    acc_lo = tl.zeros([V_PKD], dtype=tl.float32)
+    acc_hi = tl.zeros([V_PKD], dtype=tl.float32)
 
     for blk_s in range(ss, se, BN):
         bn = tl.minimum(BN, se - blk_s)
@@ -92,21 +111,23 @@ def _stage1(
         ks = tl.load(KV_sc + kg[:, None] * N_SC + osc[None, :],
                       mask=nm[:, None] & (osc[None, :] < N_SC), other=127)
 
-        # Q@K^T: [NHEADS, QK_P] @ [PKD_P, BN] -> [NHEADS, BN]
+        # Score: [1, QK_P] @ [PKD_P, BN] -> [1, BN]
+        q_2d = q_vec[None, :]
         kpt = tl.trans(kp)
-        scores = tl.dot_scaled(qb.to(tl.bfloat16), None, "bf16",
-                               kpt, ks, "e2m1")
+        scores_2d = tl.dot_scaled(q_2d.to(tl.bfloat16), None, "bf16",
+                                   kpt, ks, "e2m1")
+        scores = tl.reshape(scores_2d, [BN])
         scores = scores * sm_scale
-        scores = tl.where(nm[None, :], scores, float("-inf"))
+        scores = tl.where(nm, scores, float("-inf"))
 
-        # Online softmax
-        m_ij = tl.max(scores, axis=1)
+        # Online softmax (scalar accumulators since 1 head)
+        m_ij = tl.max(scores, axis=0)
         m_new = tl.maximum(m_i, m_ij)
         alpha = tl.exp(m_i - m_new)
-        p = tl.exp(scores - m_new[:, None])  # [NHEADS, BN]
-        l_i = l_i * alpha + tl.sum(p, axis=1)
-        acc_lo = acc_lo * alpha[:, None]
-        acc_hi = acc_hi * alpha[:, None]
+        p = tl.exp(scores - m_new)
+        l_i = l_i * alpha + tl.sum(p, axis=0)
+        acc_lo = acc_lo * alpha
+        acc_hi = acc_hi * alpha
 
         # V dequant [BN, V_PKD]
         ovpk = tl.arange(0, V_PKD)
@@ -116,48 +137,18 @@ def _stage1(
         vsc = tl.load(KV_sc + kg[:, None] * N_SC + sidx[None, :],
                        mask=nm[:, None], other=127)
         vsc_f = tl.exp2((vsc.to(tl.int32) - 127).to(tl.float32))
+        vlo, vhi = _fp4_dequant(vp, vsc_f)
 
-        # fp4 dequant
-        lo_raw = (vp & 0xF).to(tl.int32)
-        hi_raw = (vp >> 4).to(tl.int32)
-        lo_mag = lo_raw & 7
-        hi_mag = hi_raw & 7
-        lo_e = lo_mag >> 1
-        lo_m = lo_mag & 1
-        lo_val = tl.where(lo_e == 0,
-                          lo_m.to(tl.float32) * 0.5,
-                          tl.exp2((lo_e - 1).to(tl.float32)) * (1.0 + lo_m.to(tl.float32) * 0.5))
-        lo_val = tl.where(lo_raw >= 8, -lo_val, lo_val) * vsc_f
-        hi_e = hi_mag >> 1
-        hi_m = hi_mag & 1
-        hi_val = tl.where(hi_e == 0,
-                          hi_m.to(tl.float32) * 0.5,
-                          tl.exp2((hi_e - 1).to(tl.float32)) * (1.0 + hi_m.to(tl.float32) * 0.5))
-        hi_val = tl.where(hi_raw >= 8, -hi_val, hi_val) * vsc_f
-
-        # V accum via tl.dot: p[NHEADS, BN] @ V[BN, V_PKD] -> [NHEADS, V_PKD]
-        pb = p.to(tl.bfloat16)
-        acc_lo += tl.dot(pb, lo_val.to(tl.bfloat16)).to(tl.float32)
-        acc_hi += tl.dot(pb, hi_val.to(tl.bfloat16)).to(tl.float32)
+        # V accum: p[BN] @ V[BN, V_PKD] -> [V_PKD]
+        acc_lo += tl.sum(p[:, None] * vlo, axis=0)
+        acc_hi += tl.sum(p[:, None] * vhi, axis=0)
         m_i = m_new
 
-    # Normalize
     inv_l = 1.0 / l_i
-    acc_lo = acc_lo * inv_l[:, None]
-    acc_hi = acc_hi * inv_l[:, None]
-    lse_vals = m_i + tl.log(l_i)
-
-    # Store lse
-    tl.store(Mid_lse + obase_lse + oh, lse_vals)
-
-    # Store lo/hi per head
+    tl.store(Mid_lse + lse_off, m_i + tl.log(l_i))
     ov = tl.arange(0, V_PKD)
-    for h in tl.static_range(NHEADS):
-        mask_h = (oh == h)[:, None]
-        lo_h = tl.sum(acc_lo * mask_h, axis=0)
-        hi_h = tl.sum(acc_hi * mask_h, axis=0)
-        tl.store(Mid_lo + obase_v + h * V_PKD + ov, lo_h)
-        tl.store(Mid_hi + obase_v + h * V_PKD + ov, hi_h)
+    tl.store(Mid_lo + v_off + ov, acc_lo * inv_l)
+    tl.store(Mid_hi + v_off + ov, acc_hi * inv_l)
 
 
 @triton.jit
@@ -221,7 +212,7 @@ def custom_kernel(data: input_t) -> output_t:
     mid_lse = torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda")
     o = torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
 
-    _stage1[(bs * NSPLIT,)](
+    _stage1[(bs * NSPLIT * NUM_HEADS,)](
         q.view(-1, NUM_HEADS, QK_HEAD_DIM), kv_pk, kv_sc,
         kv_indptr, qo_indptr,
         mid_lo, mid_hi, mid_lse,
@@ -230,7 +221,7 @@ def custom_kernel(data: input_t) -> output_t:
         QK_DIM=QK_HEAD_DIM, V_PKD=V_PKD,
         PKD=PKD, N_SC=N_SC,
         QK_P=QK_PAD, PKD_P=PKD_PAD, NSC_P=NSC_PAD,
-        num_warps=8, num_stages=2,
+        num_warps=4, num_stages=2,
     )
 
     _stage2[(bs, NUM_HEADS)](
