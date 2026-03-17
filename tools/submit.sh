@@ -62,7 +62,7 @@ print(json.dumps(d))
 " >> "$SESSION_FILE"
 
 elif [ "$MODE" = "leaderboard" ]; then
-    # Compute geomean from Ranked Benchmark ⏱ lines
+    # Compute geomean from Ranked Benchmark ⏱ lines (normalizing ms → µs)
     SCORE=$(echo "$RESULT" | python3 -c "
 import sys, re, math
 text = sys.stdin.read()
@@ -76,16 +76,22 @@ if idx == -1:
     print('ERROR: No Ranked Benchmark section found in output', file=sys.stderr)
     sys.exit(1)
 ranked_section = text[idx:]
-# Extract mean times: ⏱ 91.6 ± ... µs
-times = re.findall(r'⏱\s+([0-9]+(?:\.[0-9]+)?)\s*±', ranked_section)
-if not times:
-    # Fallback: any number before ± in the ranked section
-    times = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*±', ranked_section)
-if not times:
+# Extract mean times with units: ⏱ 91.6 ± ... µs  OR  ⏱ 2.02 ± ... ms
+entries = re.findall(r'⏱\s+([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', ranked_section)
+if not entries:
+    # Fallback: any number before ± with a unit
+    entries = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', ranked_section)
+if not entries:
     print('ERROR: No timing values found in Ranked Benchmark section', file=sys.stderr)
     sys.exit(1)
-times = [float(t) for t in times]
-geomean = math.exp(sum(math.log(t) for t in times) / len(times))
+# Normalize all to µs
+times_us = []
+for val, unit in entries:
+    t = float(val)
+    if unit == 'ms':
+        t *= 1000.0
+    times_us.append(t)
+geomean = math.exp(sum(math.log(t) for t in times_us) / len(times_us))
 print(f'{geomean:.2f}')
 " || echo "")
 
