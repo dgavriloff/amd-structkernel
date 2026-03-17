@@ -2,11 +2,15 @@
 #!POPCORN gpu MI355X
 
 """
-v198: BSN=64 for M<=32 K<=1024 fused shapes (from BSN=128).
+v188: Gluon reduce kernel for split-K + .wt on M=256 quant stores.
 
-Hypothesis: Doubling grid from ~90 to ~180 blocks improves CU utilization for
-memory-bound small-M K=512 shapes. BSN=64 NW=4 was tested for M=64 (v101, +73%)
-but never for M<=32 K<=1024, which has fundamentally different compute/memory ratio.
+Hypothesis: Two changes targeting different paths:
+1. Replace Triton _gemm_afp4wfp4_reduce_kernel with gluon version for split-K
+   reduce (16x2112x7168). Gluon uses explicit gl.amd.cdna4.buffer_load/store
+   and DistributedLinearLayout for optimal data movement. REDUCE_BSN=64
+   (gluon default for fp32) vs current BSN=16.
+2. .wt cache modifier on M=256 quant fp4 stores — confirmed real -1.5 to -3%
+   on M=256 across 5 tests (v176/v177/v178/v182/v187).
 """
 import torch
 import triton
@@ -86,7 +90,7 @@ def _get_fused_config(M, N, K):
     elif M <= 32 and K <= 1024:
         return {
             "BLOCK_SIZE_M": 8,
-            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
