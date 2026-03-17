@@ -118,3 +118,4 @@
 {"v": 129, "what": "FlyDSL t64x128x128_atomic stage2 for d=2048", "keywords": ["atomic", "flydsl", "stage2"], "score": 279.0, "kept": false, "reason": "worse"}
 {"v": 130, "what": "FlyDSL t32x256x128_reduce stage2 for d=2048", "keywords": ["flydsl", "reduce", "stage2"], "score": 255.0, "kept": false, "reason": "noise"}
 {"v": 131, "what": "FlyDSL t32x128x64_atomic stage2 for d=512 (tile_k=64)", "keywords": ["atomic", "flydsl", "stage2", "tile-config"], "score": 122.0, "kept": false, "reason": "noise"}
+{"v": 138, "what": "FlyDSL t16x128x128 stage2 for BOTH d=512 AND d=2048", "keywords": ["atomic", "flydsl", "stage2", "tile-config"], "score": 75.18, "kept": true, "reason": "improved geomean", "session": 8}

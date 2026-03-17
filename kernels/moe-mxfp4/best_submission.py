@@ -2,10 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v134: FlyDSL t16x256x128_atomic stage2 for d=2048.
-tile_m=16 (vs 32 in v127) doubles M-subtiles from 4 to 8 per block_m=128.
-More M-level parallelism. tile_m*tile_k=16*128=2048, divisible by 256 (OK).
-Keep d=512 as t32x128x128 (v125 winner).
+v138: FlyDSL t16x128x128_atomic stage2 for BOTH d=512 AND d=2048.
+tile_m=16 helps both shapes. d=512: 126->112us (-11%) in v137 BM.
+d=2048: noise-level parity in v136. Combined for cumulative BM improvement.
 """
 import os
 import functools
@@ -31,6 +30,10 @@ _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomi
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"] = {
     "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
     "tile_m": 16, "tile_n": 256, "tile_k": 128, "mode": "atomic", "MPerBlock": 16,
+}
+_flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"] = {
+    "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
+    "tile_m": 16, "tile_n": 128, "tile_k": 128, "mode": "atomic", "MPerBlock": 16,
 }
 
 # Inject ksplit=2 configs for shapes that benefit from cktile_moe path
@@ -95,22 +98,23 @@ _FLYDSL_STAGE2 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x256_atomic"
 _FLYDSL_STAGE2_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"
 _FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
 _FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
+_FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
 
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 128,
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N256_K128,  # v134: tile_m=16 for more M-parallelism
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
     "run_1stage": False,
 }
 
 # === bs=512/E=33/d=512: block_m=128 + 4-WG M128 stage1 + FlyDSL stage2 ===
-# v125: try tile_k=128 for d=512 (K=512). 4 K-iterations vs 2 with tile_k=256.
+# v138: tile_m=16 for d=512 (v137 BM: 126->112us)
 _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
     "block_m": 128,
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_K128,
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=512
     "run_1stage": False,
 }
 
