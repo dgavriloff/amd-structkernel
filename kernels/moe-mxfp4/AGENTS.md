@@ -13,7 +13,7 @@
 8. Treat `test` as the correctness gate, `bm` as the main search loop, and `leaderboard` as confirmation.
 9. Adapt to the limits reported by the tools. Do not assume fixed rates. If any quota is exhausted, switch to work that does not spend that quota.
 10. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
-11. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh`
+11. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh`, then `exit`
 
 ## Rules
 - Never edit files in `state/`. The tools do that.
@@ -22,3 +22,4 @@
 - Clone repos to `reference/cloned-repos/`. Check what's already cloned first.
 - Do not let leaderboard rate limits stall the session. Use the cooldown window for research, code changes, and benchmark-driven candidate selection.
 - Queue the best candidate for the next scarce leaderboard slot instead of submitting every passing variant.
+- When the session is done and you run `./tools/close_branch.sh`, exit the Codex session immediately afterward.

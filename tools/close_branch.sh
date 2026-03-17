@@ -7,7 +7,6 @@ KERNEL_DIR="$(pwd)"
 STATE_DIR="$KERNEL_DIR/state"
 DEAD_FILE="$STATE_DIR/dead.jsonl"
 SESSIONS_DIR="$STATE_DIR/sessions"
-REPO_DIR="$(cd "$KERNEL_DIR/../.." && pwd)"
 
 SESSION_ID="${AGENT_SESSION_ID:-}"
 if [ -z "$SESSION_ID" ]; then
@@ -80,11 +79,3 @@ echo "Summary: $WHAT_FAILED"
 
 # Auto-commit
 cd "$KERNEL_DIR" && git add -A && git commit -m "session ${SESSION_ID}: closed — ${WHAT_FAILED}"
-
-# Hand off tmux cleanup to a detached helper so we do not kill this shell mid-close.
-if [ -x "$REPO_DIR/orchestrator/end-codex-subagent.sh" ]; then
-    nohup "$REPO_DIR/orchestrator/end-codex-subagent.sh" \
-        --kernel-dir "$KERNEL_DIR" \
-        --session-id "$SESSION_ID" \
-        >/dev/null 2>&1 < /dev/null &
-fi

@@ -2,9 +2,9 @@
 
 ## How to Run
 Launch one tmux-backed Codex subagent in each kernel directory in parallel.
-Register the current orchestrator tmux session with `./orchestrator/register-orchestrator-session.sh` before launching workers.
 Use `./orchestrator/launch-codex-subagent.sh --kernel <kernel>` for launches.
-When one returns or closes, immediately relaunch. Never stop. Never ask.
+After launch and verification, return to idle.
+Every 10 minutes, run `./orchestrator/status.sh`. If fewer than 3 worker tmux sessions are live, relaunch the missing kernel workers. Never stop. Never ask.
 
 The launcher assigns each agent a session ID via `./orchestrator/next_id.sh`.
 
@@ -34,13 +34,12 @@ Launch and maintain one worker for each kernel under `./kernels/` that has an `A
 - `mxfp4-mm`
 
 ## Process Model
-The orchestrator itself runs inside tmux and publishes its tmux session name via `./orchestrator/register-orchestrator-session.sh`.
 Each launched subagent runs inside its own tmux session.
 Each kernel records subagent lifecycle in `state/subagents.jsonl`.
-When a kernel agent closes its session, `./tools/close_branch.sh` will trigger tmux cleanup for that agent session.
-After cleanup, the helper will send a notification into the orchestrator tmux session that a subagent finished.
+Worker tmux session existence is the source of truth for whether a worker is live.
+Workers are expected to exit their own Codex session after they finish and run `./tools/close_branch.sh`.
 After launching the required workers and confirming they are running, the orchestrator should return to an idle waiting state at the shell prompt.
-It is correct for the orchestrator to do nothing while waiting for a subagent-finished notification.
+It is correct for the orchestrator to do nothing between the 10-minute polling checks.
 
 ## Rules
 - Do not write or modify code as part of orchestration.
@@ -50,5 +49,5 @@ It is correct for the orchestrator to do nothing while waiting for a subagent-fi
 - Never stop on your own.
 - Use the tmux-backed launcher, not API-spawned subagents.
 - Keep exactly one live worker per kernel.
-- Treat tmux notifications about finished subagents as signals to reconcile and relaunch the affected kernel.
-- After relaunching a finished worker and confirming it is running, return to idle again.
+- Use the 10-minute status check as the relaunch mechanism.
+- After relaunching a missing worker and confirming it is running, return to idle again.
