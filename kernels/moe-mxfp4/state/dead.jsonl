@@ -15,3 +15,4 @@
 {"technique": "tile_k>128 for d=512 FlyDSL stage2", "reason": "tile_k=256 same or slightly worse than tile_k=128 for d=512 on both BM and secret LB", "count": 1, "sessions": [8]}
 {"technique": "FlyDSL stage1 fp4 compilation", "reason": "server aiter has bug: compute_f8f6f4_tile() got unexpected keyword argument b_scale in mixed_moe_gemm_2stage.py", "count": 1, "sessions": [14]}
 {"technique": "dispatch_policy=1", "reason": "+25.7% catastrophically worse for all shapes, especially d=2048 (240->310us)", "count": 1, "sessions": [18]}
+{"technique": "E=257 1x1 CK kernels from DSV3 CSV", "reason": "1x1 (64-thread, 32x32 tile) kernels from DSV3 tuned CSV are significantly slower (+9.5%) than cktile_moe ksplit=2 on the competition LB. DSV3 tuning was for different workload patterns.", "count": 1, "sessions": [22]}

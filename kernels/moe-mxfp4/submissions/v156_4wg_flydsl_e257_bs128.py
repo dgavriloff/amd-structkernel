@@ -2,9 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
-Same approach that improved bs=512/E=33 significantly in v138.
-Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
+v156: 4-WG stage1 + FlyDSL stage2 for bs=128/E=257/d=256 with block_m=32.
+Replace ksplit=2 cktile_moe. 4-WG occupancy helped bs=512/E=257 in v144.
 """
 import os
 import functools
@@ -79,27 +78,29 @@ _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
     "run_1stage": False,
 }
 
-# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
-# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
-_CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
-    "block_m": 16,
-    "ksplit": 2,
-    "kernelName1": "",
-    "kernelName2": "",
-    "run_1stage": False,
-}
-
-# === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===
-# The 256x64x128x128_1x4 kernel uses 4 workgroups per CU for better utilization.
-# v037 showed d=2048: -3.2% (349->338µs). Now also try d=512 with same 4-WG kernel.
+# === Kernel name constants ===
 _4WG_STAGE1 = "moe_ck2stages_gemm1_256x64x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 _4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
+_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 
 _FLYDSL_STAGE2 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x256_atomic"
 _FLYDSL_STAGE2_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"
 _FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
 _FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
 _FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
+
+# bs=128/E=257/d=256: 4-WG stage1 + FlyDSL stage2 (v156)
+# Same approach as bs=512/E=257 (v144). 4-WG for better CU occupancy.
+_CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
+    "block_m": 32,
+    "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M32,
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
+    "run_1stage": False,
+}
+
+# === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===
+# The 256x64x128x128_1x4 kernel uses 4 workgroups per CU for better utilization.
 
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 128,
@@ -121,8 +122,6 @@ _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
 
 # === bs=512/E=257: 4-WG CK stage1 + FlyDSL stage2 ===
 # v144: 4-WG (256x32x128x128_1x4) stage1 + FlyDSL stage2.
-# DSV3 tuned CSV uses 4-WG for token>=64/E=257. Block_m=32 matches CSV.
-_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "block_m": 32,
     "ksplit": 0,

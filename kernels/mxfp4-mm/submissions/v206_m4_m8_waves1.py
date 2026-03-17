@@ -2,9 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v207: .wt on M=256 quant scale stores (from .cg).
+v206: M<=4 and M<=8 waves_per_eu=1 (from 0).
 
-25th test: confirmed -1.5 to -3.2% on M=256 BM across 24+ tests.
+waves=0 and waves=2 both tested for M<=4/M<=8. waves=1 never tried.
+AMD tuned config for A16WFP4_PRESHUFFLED M<=8 uses waves_per_eu=1.
 """
 import torch
 import triton
@@ -63,7 +64,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 0,
+            "waves_per_eu": 1,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
@@ -76,7 +77,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 0,
+            "waves_per_eu": 1,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
@@ -223,7 +224,7 @@ def _fused_mxfp4_quant_shuffle_kernel(
             bs_ptr + bs_offs,
             bs_e8m0.to(tl.uint8),
             mask=bs_mask,
-            cache_modifier=".wt",
+            cache_modifier=".cg",
         )
 
 

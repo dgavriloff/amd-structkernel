@@ -2,9 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
-Same approach that improved bs=512/E=33 significantly in v138.
-Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
+v157: 4-WG M64 stage1 (256x64x128x128_1x4) for bs=512/E=33/d=2048
+instead of M128. M64 tiles give 2x more tiles for CU distribution.
 """
 import os
 import functools
@@ -101,11 +100,12 @@ _FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
 _FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
 _FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
 
+# v157: M64 for d=2048 - more tiles for better CU utilization
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
-    "block_m": 128,
+    "block_m": 64,
     "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
+    "kernelName1": _4WG_STAGE1,  # M64: 256x64x128x128_1x4
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
     "run_1stage": False,
 }
 

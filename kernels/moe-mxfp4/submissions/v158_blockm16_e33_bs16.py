@@ -2,9 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
-Same approach that improved bs=512/E=33 significantly in v138.
-Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
+v158: cktile_moe block_m=16 (instead of 32) for bs=16/E=33/d=512.
+Default cktile heuristic uses 16 for token<2048.
 """
 import os
 import functools
@@ -47,10 +46,10 @@ def _make_key(token, inter_dim, expert):
         "QuantType.per_1x32", True, False,
     )
 
-# === E=33 shapes (from v018, proven) ===
-# bs=16/E=33/d=512: cktile_moe gives 59.6us vs 88.7us baseline (-32.8%)
+# === E=33 shapes ===
+# bs=16/E=33/d=512: cktile_moe ksplit=2 with block_m=16 (v158: smaller tiles)
 _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
-    "block_m": 32,
+    "block_m": 16,
     "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",
