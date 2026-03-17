@@ -13,7 +13,7 @@
 8. Treat `test` as the correctness gate, `bm` as the main search loop, and `leaderboard` as confirmation.
 9. Adapt to the limits reported by the tools. Do not assume fixed rates. If any quota is exhausted, switch to work that does not spend that quota.
 10. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
-11. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh`, then `exit`
+11. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh --what-failed "summary of what was attempted"`, then `exit`
 
 ## Rules
 - Never edit files in `state/`. The tools do that.
