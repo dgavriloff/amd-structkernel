@@ -4,3 +4,5 @@
 {"action": "submit", "mode": "test", "v": 110, "result": "pass", "ts": "2026-03-17T07:15:23.212858+00:00Z"}
 {"action": "submit", "mode": "leaderboard", "v": 110, "score": 128.14, "best": 23.3, "kept": false, "ts": "2026-03-17T07:22:56.451943+00:00Z"}
 {"action": "propose", "what": "MXFP4 Triton kernel v2: per-head processing, optimized fp4 dequant", "why": "v110 proved MXFP4 Triton works (all tests pass, max error 0.00027) but was 5.5x slower. Main bottlenecks: 16-head parallel register pressure, nested tl.where dequant, masked row extraction. Fix: process 1 head per program, use optimized fp4 decode.", "keywords": ["mxfp4", "triton", "per-head", "dequant"], "prior_matches": 0, "ts": "2026-03-17T07:25:39.802335+00:00Z", "override": "v110 proved feasibility but had 5.5x regression. This is a fundamentally different kernel structure (per-head vs all-heads) with optimized dequant."}
+{"action": "submit", "mode": "test", "v": 111, "result": "fail", "ts": "2026-03-17T07:28:24.973407+00:00Z"}
+{"action": "submit", "mode": "test", "v": 111, "result": "pass", "ts": "2026-03-17T07:33:34.815252+00:00Z"}

@@ -2,239 +2,232 @@
 #!POPCORN gpu MI355X
 
 """
-v089: bf16_persist page_size=64 for ALL kv>=4096.
-Based on v088.
-
-v088 showed bf16_persist page_size=32 gives -10.2% vs v057.
-page_size=64 further reduces page count by 2x.
-For bs=256,kv=8k: 128 pages (ps=64) vs 256 pages (ps=32).
-bf16 precision should allow larger pages without tolerance issues.
+v111: MXFP4 Triton kernel v2 - per-head processing, optimized dequant.
+Grid: (batch * num_splits * num_heads). Each program handles one (batch, split, head).
+V dequant uses arithmetic fp4 e2m1 decode instead of nested tl.where.
+dot_scaled for Q*K^T, manual dequant + reduction for V accumulation.
 """
 
 import torch
+import triton
+import triton.language as tl
 from task import input_t, output_t
 
-from aiter.mla import mla_decode_fwd
-from aiter import dtypes as aiter_dtypes
-from aiter import get_mla_metadata_info_v1, get_mla_metadata_v1
-
-FP8_DTYPE = aiter_dtypes.fp8
-
-# MLA constants
 NUM_HEADS = 16
-NUM_KV_HEADS = 1
-KV_LORA_RANK = 512
-QK_ROPE_HEAD_DIM = 64
-QK_HEAD_DIM = KV_LORA_RANK + QK_ROPE_HEAD_DIM  # 576
-V_HEAD_DIM = KV_LORA_RANK                       # 512
+QK_HEAD_DIM = 576
+V_HEAD_DIM = 512
 SM_SCALE = 1.0 / (QK_HEAD_DIM ** 0.5)
+QK_PAD = 1024
+PKD_PAD = 512
+NSC_PAD = 32
 
-NUM_KV_SPLITS = 32
-
-# Cache per (path_type, batch_size, kv_seq_len)
 _cache = {}
 
-# FP8 constants for fallback
-_FP8_FINFO = torch.finfo(FP8_DTYPE)
+
+@triton.jit
+def _fp4_dequant(packed, scale_f32):
+    """Dequant packed uint8 fp4x2. Returns (lo_val, hi_val) fp32."""
+    lo_raw = (packed & 0xF).to(tl.int32)
+    hi_raw = (packed >> 4).to(tl.int32)
+    lo_mag = lo_raw & 7
+    hi_mag = hi_raw & 7
+    lo_e = lo_mag >> 1
+    lo_m = lo_mag & 1
+    lo_val = tl.where(lo_e == 0,
+                      lo_m.to(tl.float32) * 0.5,
+                      tl.exp2((lo_e - 1).to(tl.float32)) * (1.0 + lo_m.to(tl.float32) * 0.5))
+    lo_val = tl.where(lo_raw >= 8, -lo_val, lo_val) * scale_f32
+    hi_e = hi_mag >> 1
+    hi_m = hi_mag & 1
+    hi_val = tl.where(hi_e == 0,
+                      hi_m.to(tl.float32) * 0.5,
+                      tl.exp2((hi_e - 1).to(tl.float32)) * (1.0 + hi_m.to(tl.float32) * 0.5))
+    hi_val = tl.where(hi_raw >= 8, -hi_val, hi_val) * scale_f32
+    return lo_val, hi_val
 
 
-def _get_path(batch_size, kv_seq_len):
-    """Decide which path to use: 'bf16', 'bf16_persist', or 'a16w8'."""
-    if batch_size <= 4 and kv_seq_len <= 1024:
-        return 'bf16'
-    if kv_seq_len >= 4096:
-        return 'bf16_persist'
-    return 'a16w8'
+@triton.jit
+def _stage1(
+    Q, KV_pk, KV_sc, kv_indptr, qo_indptr,
+    Mid_lo, Mid_hi, Mid_lse,
+    sm_scale,
+    NSPLIT: tl.constexpr,
+    BN: tl.constexpr,
+    NHEADS: tl.constexpr,
+    QK_DIM: tl.constexpr,
+    V_PKD: tl.constexpr,
+    PKD: tl.constexpr,
+    N_SC: tl.constexpr,
+    QK_P: tl.constexpr,
+    PKD_P: tl.constexpr,
+    NSC_P: tl.constexpr,
+):
+    pid = tl.program_id(0)
+    hid = pid % NHEADS
+    pid2 = pid // NHEADS
+    sid = pid2 % NSPLIT
+    bid = pid2 // NSPLIT
+
+    kv_s = tl.load(kv_indptr + bid)
+    kv_e = tl.load(kv_indptr + bid + 1)
+    kv_len = kv_e - kv_s
+    qi = tl.load(qo_indptr + bid)
+
+    per_split = tl.cdiv(kv_len, NSPLIT)
+    ss = sid * per_split
+    se = tl.minimum(ss + per_split, kv_len)
+
+    lse_off = (qi * NSPLIT + sid) * NHEADS + hid
+    v_off = lse_off * V_PKD
+
+    if ss >= kv_len:
+        tl.store(Mid_lse + lse_off, float("-inf"))
+        ov = tl.arange(0, V_PKD)
+        tl.store(Mid_lo + v_off + ov, tl.zeros([V_PKD], dtype=tl.float32))
+        tl.store(Mid_hi + v_off + ov, tl.zeros([V_PKD], dtype=tl.float32))
+        return
+
+    # Load Q for this head: [QK_P] bf16
+    ok = tl.arange(0, QK_P)
+    q_vec = tl.load(Q + qi * NHEADS * QK_DIM + hid * QK_DIM + ok,
+                     mask=ok < QK_DIM, other=0.0)
+
+    m_i = float("-inf")
+    l_i = 0.0
+    acc_lo = tl.zeros([V_PKD], dtype=tl.float32)
+    acc_hi = tl.zeros([V_PKD], dtype=tl.float32)
+
+    for blk_s in range(ss, se, BN):
+        bn = tl.minimum(BN, se - blk_s)
+        on = tl.arange(0, BN)
+        nm = on < bn
+        kg = kv_s + blk_s + on
+
+        # K packed [BN, PKD_P], K scale [BN, NSC_P]
+        opk = tl.arange(0, PKD_P)
+        kp = tl.load(KV_pk + kg[:, None] * PKD + opk[None, :],
+                      mask=nm[:, None] & (opk[None, :] < PKD), other=0)
+        osc = tl.arange(0, NSC_P)
+        ks = tl.load(KV_sc + kg[:, None] * N_SC + osc[None, :],
+                      mask=nm[:, None] & (osc[None, :] < N_SC), other=127)
+
+        # Score: [1, QK_P] @ [PKD_P, BN] -> [1, BN]
+        q_2d = q_vec[None, :]
+        kpt = tl.trans(kp)
+        scores_2d = tl.dot_scaled(q_2d.to(tl.bfloat16), None, "bf16",
+                                   kpt, ks, "e2m1")
+        scores = tl.reshape(scores_2d, [BN])
+        scores = scores * sm_scale
+        scores = tl.where(nm, scores, float("-inf"))
+
+        # Online softmax (scalar accumulators since 1 head)
+        m_ij = tl.max(scores, axis=0)
+        m_new = tl.maximum(m_i, m_ij)
+        alpha = tl.exp(m_i - m_new)
+        p = tl.exp(scores - m_new)
+        l_i = l_i * alpha + tl.sum(p, axis=0)
+        acc_lo = acc_lo * alpha
+        acc_hi = acc_hi * alpha
+
+        # V dequant [BN, V_PKD]
+        ovpk = tl.arange(0, V_PKD)
+        vp = tl.load(KV_pk + kg[:, None] * PKD + ovpk[None, :],
+                      mask=nm[:, None], other=0)
+        sidx = ovpk // 16
+        vsc = tl.load(KV_sc + kg[:, None] * N_SC + sidx[None, :],
+                       mask=nm[:, None], other=127)
+        vsc_f = tl.exp2((vsc.to(tl.int32) - 127).to(tl.float32))
+        vlo, vhi = _fp4_dequant(vp, vsc_f)
+
+        # V accum: p[BN] @ V[BN, V_PKD] -> [V_PKD]
+        acc_lo += tl.sum(p[:, None] * vlo, axis=0)
+        acc_hi += tl.sum(p[:, None] * vhi, axis=0)
+        m_i = m_new
+
+    inv_l = 1.0 / l_i
+    tl.store(Mid_lse + lse_off, m_i + tl.log(l_i))
+    ov = tl.arange(0, V_PKD)
+    tl.store(Mid_lo + v_off + ov, acc_lo * inv_l)
+    tl.store(Mid_hi + v_off + ov, acc_hi * inv_l)
 
 
-def _build_persistent_meta(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr, dtype_q, dtype_kv, page_size):
-    """Build persistent mode metadata for given Q/KV dtypes and page_size."""
-    total_kv_len = batch_size * kv_seq_len
+@triton.jit
+def _stage2(
+    Mid_lo, Mid_hi, Mid_lse, O, qo_indptr,
+    NSPLIT: tl.constexpr,
+    NHEADS: tl.constexpr,
+    V_PKD: tl.constexpr,
+    V_DIM: tl.constexpr,
+):
+    bid = tl.program_id(0)
+    hid = tl.program_id(1)
+    qi = tl.load(qo_indptr + bid)
 
-    if page_size > 1:
-        num_pages = total_kv_len // page_size
-        kv_indices = torch.arange(num_pages, dtype=torch.int32, device="cuda")
-        kv_indptr_use = torch.arange(0, batch_size + 1, dtype=torch.int32, device="cuda") * (kv_seq_len // page_size)
-        kv_last_page_len = torch.full((batch_size,), page_size, dtype=torch.int32, device="cuda")
-    else:
-        kv_indices = torch.arange(total_kv_len, dtype=torch.int32, device="cuda")
-        kv_indptr_use = kv_indptr
-        kv_last_page_len = (kv_indptr[1:] - kv_indptr[:-1]).to(torch.int32)
+    mx = float("-inf")
+    for s in tl.static_range(NSPLIT):
+        lse = tl.load(Mid_lse + (qi * NSPLIT + s) * NHEADS + hid)
+        mx = tl.maximum(mx, lse)
 
-    max_q_len = 1
-    info = get_mla_metadata_info_v1(
-        batch_size, max_q_len, NUM_HEADS, dtype_q, dtype_kv,
-        is_sparse=False, fast_mode=True,
-        num_kv_splits=NUM_KV_SPLITS, intra_batch_mode=True,
-    )
-    work = [torch.empty(s, dtype=t, device="cuda") for s, t in info]
-    (work_metadata, work_indptr, work_info_set,
-     reduce_indptr, reduce_final_map, reduce_partial_map) = work
+    ov = tl.arange(0, V_PKD)
+    a_lo = tl.zeros([V_PKD], dtype=tl.float32)
+    a_hi = tl.zeros([V_PKD], dtype=tl.float32)
+    lsum = 0.0
+    for s in tl.static_range(NSPLIT):
+        lse = tl.load(Mid_lse + (qi * NSPLIT + s) * NHEADS + hid)
+        w = tl.exp(lse - mx)
+        lsum += w
+        base = ((qi * NSPLIT + s) * NHEADS + hid) * V_PKD
+        a_lo += w * tl.load(Mid_lo + base + ov)
+        a_hi += w * tl.load(Mid_hi + base + ov)
 
-    get_mla_metadata_v1(
-        qo_indptr, kv_indptr_use, kv_last_page_len,
-        NUM_HEADS // NUM_KV_HEADS,
-        NUM_KV_HEADS,
-        True,
-        work_metadata, work_info_set, work_indptr,
-        reduce_indptr, reduce_final_map, reduce_partial_map,
-        page_size=page_size,
-        kv_granularity=max(page_size, 16),
-        max_seqlen_qo=max_q_len,
-        uni_seqlen_qo=max_q_len,
-        fast_mode=True,
-        max_split_per_batch=NUM_KV_SPLITS,
-        intra_batch_mode=True,
-        dtype_q=dtype_q,
-        dtype_kv=dtype_kv,
-    )
-
-    meta = {
-        "work_meta_data": work_metadata,
-        "work_indptr": work_indptr,
-        "work_info_set": work_info_set,
-        "reduce_indptr": reduce_indptr,
-        "reduce_final_map": reduce_final_map,
-        "reduce_partial_map": reduce_partial_map,
-    }
-
-    o = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
-
-    return meta, kv_indices, kv_last_page_len, kv_indptr_use, page_size, o
-
-
-def _get_cached_a16w8(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr):
-    """Get or build all cached buffers for a16w8 persistent path (bf16 Q + fp8 KV)."""
-    if kv_seq_len >= 4096:
-        page_size = 16
-    elif kv_seq_len >= 1024 and batch_size >= 32:
-        page_size = 8
-    elif kv_seq_len >= 1024:
-        page_size = 2
-    else:
-        page_size = 1
-    key = ('a16w8', batch_size, kv_seq_len, page_size)
-    if key in _cache:
-        return _cache[key]
-    cached = _build_persistent_meta(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr, torch.bfloat16, FP8_DTYPE, page_size)
-    _cache[key] = cached
-    return cached
-
-
-def _get_cached_bf16(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr):
-    """Get or build cached buffers for bf16 non-persistent path."""
-    key = ('bf16', batch_size, kv_seq_len)
-    if key in _cache:
-        return _cache[key]
-
-    total_kv_len = batch_size * kv_seq_len
-    kv_indices = torch.arange(total_kv_len, dtype=torch.int32, device="cuda")
-    kv_last_page_len = (kv_indptr[1:] - kv_indptr[:-1]).to(torch.int32)
-    o = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
-
-    cached = (kv_indices, kv_last_page_len, o)
-    _cache[key] = cached
-    return cached
-
-
-def _get_cached_bf16_persist(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr):
-    """Get or build cached buffers for bf16 persistent path."""
-    page_size = 64
-    key = ('bf16_persist', batch_size, kv_seq_len, page_size)
-    if key in _cache:
-        return _cache[key]
-    cached = _build_persistent_meta(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr, torch.bfloat16, torch.bfloat16, page_size)
-    _cache[key] = cached
-    return cached
+    inv = 1.0 / lsum
+    o_base = qi * NHEADS * V_DIM + hid * V_DIM
+    tl.store(O + o_base + ov * 2, (a_lo * inv).to(tl.bfloat16))
+    tl.store(O + o_base + ov * 2 + 1, (a_hi * inv).to(tl.bfloat16))
 
 
 def custom_kernel(data: input_t) -> output_t:
-    """MLA decode with hybrid bf16/bf16_persist/a16w8 strategy."""
     q, kv_data, qo_indptr, kv_indptr, config = data
+    bs = config["batch_size"]
+    tq = q.shape[0]
 
-    batch_size = config["batch_size"]
-    kv_seq_len = config["kv_seq_len"]
+    kv_pk_raw, kv_sc_raw = kv_data["mxfp4"]
+    kv_pk = kv_pk_raw.view(torch.uint8) if kv_pk_raw.dtype != torch.uint8 else kv_pk_raw
+    kv_sc = kv_sc_raw.view(torch.uint8) if kv_sc_raw.dtype != torch.uint8 else kv_sc_raw
+    if kv_pk.dim() > 2:
+        kv_pk = kv_pk.reshape(kv_pk.shape[0], -1)
+    if kv_sc.dim() > 2:
+        kv_sc = kv_sc.reshape(kv_sc.shape[0], -1)
 
-    path = _get_path(batch_size, kv_seq_len)
+    PKD = kv_pk.shape[-1]
+    N_SC = kv_sc.shape[-1]
+    V_PKD = V_HEAD_DIM // 2
 
-    if path == 'bf16':
-        kv_buffer = kv_data["bf16"]
-        kv_buffer_4d = kv_buffer.view(kv_buffer.shape[0], 1, NUM_KV_HEADS, kv_buffer.shape[-1])
+    NSPLIT = 16
+    BN = 64
 
-        kv_indices, kv_last_page_len, o = _get_cached_bf16(
-            batch_size, kv_seq_len, q.shape[0], qo_indptr, kv_indptr
-        )
+    n_mid = tq * NSPLIT * NUM_HEADS * V_PKD
+    mid_lo = torch.empty(n_mid, dtype=torch.float32, device="cuda")
+    mid_hi = torch.empty(n_mid, dtype=torch.float32, device="cuda")
+    mid_lse = torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda")
+    o = torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
 
-        # Non-persistent mode: no metadata, auto-tuned splits
-        mla_decode_fwd(
-            q.view(-1, NUM_HEADS, QK_HEAD_DIM),
-            kv_buffer_4d,
-            o,
-            qo_indptr,
-            kv_indptr,
-            kv_indices,
-            kv_last_page_len,
-            1,
-            page_size=1,
-            nhead_kv=NUM_KV_HEADS,
-            sm_scale=SM_SCALE,
-            logit_cap=0.0,
-        )
+    _stage1[(bs * NSPLIT * NUM_HEADS,)](
+        q.view(-1, NUM_HEADS, QK_HEAD_DIM), kv_pk, kv_sc,
+        kv_indptr, qo_indptr,
+        mid_lo, mid_hi, mid_lse,
+        SM_SCALE,
+        NSPLIT=NSPLIT, BN=BN, NHEADS=NUM_HEADS,
+        QK_DIM=QK_HEAD_DIM, V_PKD=V_PKD,
+        PKD=PKD, N_SC=N_SC,
+        QK_P=QK_PAD, PKD_P=PKD_PAD, NSC_P=NSC_PAD,
+        num_warps=4, num_stages=2,
+    )
 
-    elif path == 'bf16_persist':
-        kv_buffer = kv_data["bf16"]
-
-        meta, kv_indices, kv_last_page_len, kv_indptr_use, page_size, o = _get_cached_bf16_persist(
-            batch_size, kv_seq_len, q.shape[0], qo_indptr, kv_indptr
-        )
-
-        kv_buffer_4d = kv_buffer.view(-1, page_size, NUM_KV_HEADS, kv_buffer.shape[-1])
-
-        mla_decode_fwd(
-            q.view(-1, NUM_HEADS, QK_HEAD_DIM),
-            kv_buffer_4d,
-            o,
-            qo_indptr,
-            kv_indptr_use,
-            kv_indices,
-            kv_last_page_len,
-            1,
-            page_size=page_size,
-            nhead_kv=NUM_KV_HEADS,
-            sm_scale=SM_SCALE,
-            logit_cap=0.0,
-            num_kv_splits=NUM_KV_SPLITS,
-            intra_batch_mode=True,
-            **meta,
-        )
-
-    else:
-        # a16w8: bf16 Q + fp8 KV persistent
-        kv_buffer_fp8, kv_scale = kv_data["fp8"]
-
-        meta, kv_indices, kv_last_page_len, kv_indptr_use, page_size, o = _get_cached_a16w8(
-            batch_size, kv_seq_len, q.shape[0], qo_indptr, kv_indptr
-        )
-
-        kv_buffer_4d = kv_buffer_fp8.view(-1, page_size, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
-
-        mla_decode_fwd(
-            q.view(-1, NUM_HEADS, QK_HEAD_DIM),
-            kv_buffer_4d,
-            o,
-            qo_indptr,
-            kv_indptr_use,
-            kv_indices,
-            kv_last_page_len,
-            1,
-            page_size=page_size,
-            nhead_kv=NUM_KV_HEADS,
-            sm_scale=SM_SCALE,
-            logit_cap=0.0,
-            num_kv_splits=NUM_KV_SPLITS,
-            kv_scale=kv_scale,
-            intra_batch_mode=True,
-            **meta,
-        )
+    _stage2[(bs, NUM_HEADS)](
+        mid_lo, mid_hi, mid_lse, o, qo_indptr,
+        NSPLIT=NSPLIT, NHEADS=NUM_HEADS, V_PKD=V_PKD, V_DIM=V_HEAD_DIM,
+        num_warps=4,
+    )
 
     return o
