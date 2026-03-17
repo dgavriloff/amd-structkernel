@@ -76,3 +76,6 @@ fi
 echo ""
 echo "Session $SESSION_ID closed. $REVERTS reverts, $KEEPS keeps."
 echo "Summary: $WHAT_FAILED"
+
+# Auto-commit
+cd "$KERNEL_DIR" && git add -A && git commit -m "session ${SESSION_ID}: closed — ${WHAT_FAILED}"

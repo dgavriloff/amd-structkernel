@@ -111,6 +111,9 @@ import json, datetime, os
 d = {'v': $VERSION, 'what': os.environ['_WHAT'], 'keywords': $PROP_KEYWORDS, 'score': float('$SCORE'), 'kept': True, 'reason': 'improved geomean', 'session': $SESSION_ID}
 print(json.dumps(d))
 " >> "$TRIED_FILE"
+
+        # Auto-commit on KEEP
+        cd "$KERNEL_DIR" && git add -A && git commit -m "v${VERSION}: KEEP — ${PROP_WHAT} (${CHANGE})"
     else
         CHANGE=$(python3 -c "print(f'{(float(\"$SCORE\") / float(\"$BEST_SCORE\") - 1) * 100:+.1f}%')")
         echo ""
