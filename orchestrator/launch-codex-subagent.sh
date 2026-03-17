@@ -52,19 +52,25 @@ fi
 
 mkdir -p "$RUN_DIR"
 LAUNCHER="$RUN_DIR/${TMUX_SESSION}.sh"
+PROMPT_LINE_1="cd $KERNEL_DIR && export AGENT_SESSION_ID=$SESSION_ID"
+PROMPT_LINE_2="You are an AMD kernel optimization agent. Read the AGENTS.md, then follow the workflow."
 
 cat > "$LAUNCHER" <<EOF
 #!/bin/bash
 set -euo pipefail
 cd "$REPO_DIR"
-codex exec --dangerously-bypass-approvals-and-sandbox --model "$MODEL" - <<'__CODEX_PROMPT__'
-cd $KERNEL_DIR && export AGENT_SESSION_ID=$SESSION_ID
-You are an AMD kernel optimization agent. Read the AGENTS.md, then follow the workflow.
-__CODEX_PROMPT__
+exec codex --dangerously-bypass-approvals-and-sandbox --no-alt-screen --model "$MODEL"
 EOF
 chmod +x "$LAUNCHER"
 
 tmux new-session -d -s "$TMUX_SESSION" "$LAUNCHER"
+sleep 3
+tmux send-keys -t "$TMUX_SESSION" "$PROMPT_LINE_1"
+tmux send-keys -t "$TMUX_SESSION" Enter
+tmux send-keys -t "$TMUX_SESSION" "$PROMPT_LINE_2"
+tmux send-keys -t "$TMUX_SESSION" Enter
+sleep 1
+tmux send-keys -t "$TMUX_SESSION" Enter
 
 mkdir -p "$(dirname "$STATE_FILE")"
 _SESSION_ID="$SESSION_ID" _TMUX_SESSION="$TMUX_SESSION" _MODEL="$MODEL" python3 - <<'PY' >> "$STATE_FILE"
