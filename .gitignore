@@ -8,3 +8,7 @@ __pycache__/
 # Reference repos (cloned locally)
 reference/cloned-repos/
 .next_id
+orchestrator/.next_id
+orchestrator/.next_id.lock
+orchestrator/run/
+kernels/*/state/subagents.jsonl
