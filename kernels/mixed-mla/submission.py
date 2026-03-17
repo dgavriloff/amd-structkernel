@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v119: Micro-optimized v114 - hardcode sm_scale, inline constants.
-- Hardcode sm_scale as float literal (0.04166...) to avoid register use.
-- Keep MXFP4 K + FP8 V, adaptive NSPLIT (8/16).
-- Use int64 only where needed for fp8 offsets.
-- Inline V_DIM and reduce intermediate computations.
+v120: Cache intermediate buffers to eliminate torch.empty overhead per call.
+- Cache mid_v, mid_lse, o buffers keyed by (tq, NSPLIT) — reused across iterations.
+- Pass q directly without .view() — kernel uses manual offsets anyway.
+- Inline all Python-side constants to reduce overhead.
+- Keep MXFP4 K + FP8 V, adaptive NSPLIT (8/16), BN=64.
 """
 
 import torch
@@ -17,12 +17,11 @@ from task import input_t, output_t
 NUM_HEADS = 16
 QK_HEAD_DIM = 576
 V_HEAD_DIM = 512
-SM_SCALE = 1.0 / (QK_HEAD_DIM ** 0.5)
 QK_PAD = 1024
 PKD_PAD = 512
 NSC_PAD = 32
 
-_cache = {}
+_buf_cache = {}
 
 
 @triton.jit
@@ -92,7 +91,7 @@ def _stage1(
         scores_2d = tl.dot_scaled(q_vec[None, :].to(tl.bfloat16), None, "bf16",
                                    kpt, ks, "e2m1")
         scores = tl.reshape(scores_2d, [BN])
-        scores = scores * 0.041666666666666664  # 1/24 = 1/sqrt(576)
+        scores = scores * 0.041666666666666664
         scores = tl.where(nm, scores, float("-inf"))
 
         m_ij = tl.max(scores, axis=0)
@@ -169,23 +168,25 @@ def custom_kernel(data: input_t) -> output_t:
     FP8_STRIDE = kv_fp8.shape[-1]
 
     max_kv = int(kv_indptr[-1].item() - kv_indptr[0].item()) // max(bs, 1)
-    if max_kv <= 2048:
-        NSPLIT = 8
-    else:
-        NSPLIT = 16
-    BN = 64
+    NSPLIT = 8 if max_kv <= 2048 else 16
 
-    n_mid_v = tq * NSPLIT * NUM_HEADS * V_HEAD_DIM
-    mid_v = torch.empty(n_mid_v, dtype=torch.bfloat16, device="cuda")
-    mid_lse = torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda")
-    o = torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
+    # Cache intermediate buffers — same shape reused across iterations
+    buf_key = (tq, NSPLIT)
+    if buf_key not in _buf_cache:
+        n_mid_v = tq * NSPLIT * NUM_HEADS * V_HEAD_DIM
+        _buf_cache[buf_key] = (
+            torch.empty(n_mid_v, dtype=torch.bfloat16, device="cuda"),
+            torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda"),
+            torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda"),
+        )
+    mid_v, mid_lse, o = _buf_cache[buf_key]
 
     _stage1[(bs * NSPLIT * NUM_HEADS,)](
-        q.view(-1, NUM_HEADS, QK_HEAD_DIM), kv_pk, kv_sc, kv_fp8,
+        q, kv_pk, kv_sc, kv_fp8,
         kv_indptr, qo_indptr,
         mid_v, mid_lse,
         fp8_scale_val,
-        NSPLIT=NSPLIT, BN=BN, NHEADS=NUM_HEADS,
+        NSPLIT=NSPLIT, BN=64, NHEADS=NUM_HEADS,
         QK_DIM=QK_HEAD_DIM, V_DIM=V_HEAD_DIM,
         FP8_STRIDE=FP8_STRIDE,
         PKD=PKD, N_SC=N_SC,
