@@ -2,13 +2,12 @@
 #!POPCORN gpu MI355X
 
 """
-v089: bf16_persist page_size=64 for ALL kv>=4096.
-Based on v088.
+v108: bf16_persist ps=64 for bs=256,kv=1024 (replace a16w8 ps=8).
+Based on v089.
 
-v088 showed bf16_persist page_size=32 gives -10.2% vs v057.
-page_size=64 further reduces page count by 2x.
-For bs=256,kv=8k: 128 pages (ps=64) vs 256 pages (ps=32).
-bf16 precision should allow larger pages without tolerance issues.
+bf16_persist ps=64 is proven reliable for kv>=4096 at all batch sizes.
+bs=256,kv=1024 has 256K tokens = same as bs=32,kv=8192 which works well.
+bf16 avoids fp8 quantization error. Fewer pages (4096 vs 32768 for a16w8 ps=8).
 """
 
 import torch
@@ -43,6 +42,8 @@ def _get_path(batch_size, kv_seq_len):
     if batch_size <= 4 and kv_seq_len <= 1024:
         return 'bf16'
     if kv_seq_len >= 4096:
+        return 'bf16_persist'
+    if batch_size >= 256 and kv_seq_len >= 1024:
         return 'bf16_persist'
     return 'a16w8'
 

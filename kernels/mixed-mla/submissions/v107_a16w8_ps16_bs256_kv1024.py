@@ -2,13 +2,12 @@
 #!POPCORN gpu MI355X
 
 """
-v089: bf16_persist page_size=64 for ALL kv>=4096.
-Based on v088.
+v107: a16w8 page_size=16 for bs=256,kv=1024 only.
+Based on v089.
 
-v088 showed bf16_persist page_size=32 gives -10.2% vs v057.
-page_size=64 further reduces page count by 2x.
-For bs=256,kv=8k: 128 pages (ps=64) vs 256 pages (ps=32).
-bf16 precision should allow larger pages without tolerance issues.
+v95 tried ps=16 for bs=32/64 kv=1024 and failed tolerance at bs=64.
+bs=256 has 8x more KV tokens, should tolerate larger pages.
+Halves page count for bs=256,kv=1k: 16384 pages (ps=16) vs 32768 (ps=8).
 """
 
 import torch
@@ -106,6 +105,8 @@ def _build_persistent_meta(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr
 def _get_cached_a16w8(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr):
     """Get or build all cached buffers for a16w8 persistent path (bf16 Q + fp8 KV)."""
     if kv_seq_len >= 4096:
+        page_size = 16
+    elif kv_seq_len >= 1024 and batch_size >= 256:
         page_size = 16
     elif kv_seq_len >= 1024 and batch_size >= 32:
         page_size = 8

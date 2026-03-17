@@ -13,3 +13,4 @@
 {"technique": "ROCm env vars (AMD_DIRECT_DISPATCH, GPU_MAX_HW_QUEUES, HSA_ENABLE_SDMA, HIP_FORCE_DEV_KERNARG)", "reason": "no measurable LB effect on any env var tested", "count": 4}
 {"technique": "split-K atomic reduce", "reason": "fp32 atomic contention catastrophically slower than separate store+reduce", "count": 2}
 {"technique": "bf16 split-K partials", "reason": "bf16 truncation of 7 partial sums exceeds rtol=1e-2 tolerance", "count": 1}
+{"technique": "Two-phase for M=64", "reason": "Quant + ASM GEMM launch overhead exceeds fused preshuffle kernel benefit; 14.4us vs 13.7us LB confirmed", "count": 1, "sessions": [10]}
