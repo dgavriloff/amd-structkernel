@@ -2,31 +2,30 @@
 #!POPCORN gpu MI355X
 
 """
-v197: Separate quant + afp4wfp4_preshuffle kernel for split-K (16x2112x7168).
+v188: Gluon reduce kernel for split-K + .wt on M=256 quant stores.
 
-Replace inline PREQUANT a16wfp4_preshuffle with separate quant step then
-afp4wfp4_preshuffle_kernel which has built-in XCD remap (remap_xcd) for
-8-XCD CDNA4 locality. Quant cost trivial for M=16 (57KB FP4).
-Uses AOT-tuned config: BSM=8 BSN=128 BSK=512 NW=4 NS=1 waves=1 .cg split-K=14.
+Hypothesis: Two changes targeting different paths:
+1. Replace Triton _gemm_afp4wfp4_reduce_kernel with gluon version for split-K
+   reduce (16x2112x7168). Gluon uses explicit gl.amd.cdna4.buffer_load/store
+   and DistributedLinearLayout for optimal data movement. REDUCE_BSN=64
+   (gluon default for fp32) vs current BSN=16.
+2. .wt cache modifier on M=256 quant fp4 stores — confirmed real -1.5 to -3%
+   on M=256 across 5 tests (v176/v177/v178/v182/v187).
 """
 import torch
 import triton
 import triton.language as tl
 from aiter import dtypes
-from aiter.ops.triton._triton_kernels.quant.quant import (
-    _mxfp4_quant_op,
-    _dynamic_mxfp4_quant_kernel,
-)
+from aiter.ops.triton._triton_kernels.quant.quant import _mxfp4_quant_op
 from aiter.ops.gemm_op_a4w4 import gemm_a4w4_asm
 from aiter.ops.triton._triton_kernels.gemm.basic.gemm_a16wfp4 import (
     _gemm_a16wfp4_preshuffle_kernel,
 )
-from aiter.ops.triton._triton_kernels.gemm.basic.gemm_afp4wfp4 import (
-    _gemm_afp4wfp4_preshuffle_kernel,
-    _gemm_afp4wfp4_reduce_kernel,
-)
 from aiter.ops.triton.gluon.gemm_afp4wfp4 import (
     _gemm_afp4wfp4_reduce_kernel as _gluon_reduce_kernel,
+)
+from aiter.ops.triton._triton_kernels.gemm.basic.gemm_afp4wfp4 import (
+    _gemm_afp4wfp4_reduce_kernel,
 )
 from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import get_splitk
 
@@ -47,9 +46,9 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Split-K shape (e.g., 16x2112x7168): use separate quant + afp4wfp4_preshuffle
-        # afp4wfp4_preshuffle has built-in XCD remap for 8-XCD CDNA4 locality
-        # BSM=8 BSN=128 BSK=256 split-K=7 (same tile config, different kernel)
+        # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
+        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
+        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -61,7 +60,6 @@ def _get_fused_config(M, N, K):
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 7,
-            "use_afp4wfp4": True,  # Flag to use separate quant + afp4wfp4_preshuffle
         }
     if M <= 4:
         return {
@@ -256,9 +254,7 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
     ACTUAL_KSPLIT = triton.cdiv(K_kernel, (SPLITK_BLOCK_SIZE // 2))
     reduce_grid = (triton.cdiv(M, REDUCE_BSM), triton.cdiv(N, REDUCE_BSN))
 
-    use_afp4wfp4 = config.get("use_afp4wfp4", False)
-
-    params = {
+    return {
         'BLOCK_SIZE_M': BSM,
         'BLOCK_SIZE_N': BSN,
         'BLOCK_SIZE_K': BSK,
@@ -278,32 +274,7 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
         'REDUCE_BSN': REDUCE_BSN,
         'ACTUAL_KSPLIT': ACTUAL_KSPLIT,
         'MAX_KSPLIT': triton.next_power_of_2(NUM_KSPLIT),
-        'use_afp4wfp4': use_afp4wfp4,
     }
-
-    if use_afp4wfp4:
-        # Pre-allocate quant buffers for A
-        MXFP4_QUANT_BLOCK_SIZE = 32
-        params['A_fp4'] = torch.empty((M, K // 2), dtype=torch.uint8, device=device)
-        num_scale_cols = (K + MXFP4_QUANT_BLOCK_SIZE - 1) // MXFP4_QUANT_BLOCK_SIZE
-        params['A_scale'] = torch.empty((M, num_scale_cols), dtype=torch.uint8, device=device)
-        # Quant kernel config for M=16, K=7168
-        Q_BSM = triton.next_power_of_2(M)
-        Q_BSN = 32
-        Q_NUM_WARPS = 1
-        Q_NUM_STAGES = 1
-        Q_NUM_ITER = 1
-        params['quant_grid'] = (
-            triton.cdiv(M, Q_BSM),
-            triton.cdiv(K, Q_BSN * Q_NUM_ITER),
-        )
-        params['Q_BSM'] = Q_BSM
-        params['Q_BSN'] = Q_BSN
-        params['Q_NUM_WARPS'] = Q_NUM_WARPS
-        params['Q_NUM_STAGES'] = Q_NUM_STAGES
-        params['Q_NUM_ITER'] = Q_NUM_ITER
-
-    return params
 
 
 def _get_or_create_buffers(M, K, N, device):
@@ -398,122 +369,50 @@ def custom_kernel(data: input_t) -> output_t:
     buf = _get_or_create_buffers(M, K, N, A.device)
 
     if buf['mode'] == 'fused_splitk':
+        # Split-K path with tuned reduce kernel (REDUCE_BSN=16)
+        b_ptr = B_shuffle.data_ptr()
+        if buf['B_w'] is None or buf.get('_b_ptr') != b_ptr:
+            buf['B_w'] = B_shuffle.view(torch.uint8).reshape(N // 16, (K // 2) * 16)
+            bs_shape = B_scale_sh.shape
+            buf['B_sc'] = B_scale_sh.view(torch.uint8).reshape(
+                bs_shape[0] // 32, bs_shape[1] * 32
+            )
+            buf['_b_ptr'] = b_ptr
+
         kp = buf['splitk_params']
         out = buf['out']
         y_pp = kp['y_pp']
 
-        if kp.get('use_afp4wfp4'):
-            # Separate quant + afp4wfp4_preshuffle path (XCD remap)
-            b_ptr = B_shuffle.data_ptr()
-            if buf['B_w'] is None or buf.get('_b_ptr') != b_ptr:
-                buf['B_w'] = B_shuffle.view(torch.uint8).reshape(N // 16, (K // 2) * 16)
-                bs_shape = B_scale_sh.shape
-                buf['B_sc'] = B_scale_sh.view(torch.uint8).reshape(
-                    bs_shape[0] // 32, bs_shape[1] * 32
-                )
-                buf['_b_ptr'] = b_ptr
-
-            A_fp4 = kp['A_fp4']
-            A_scale = kp['A_scale']
-
-            # Step 1: Quant A -> FP4 + non-shuffled scales
-            _dynamic_mxfp4_quant_kernel[kp['quant_grid']](
-                A,
-                A_fp4,
-                A_scale,
-                A.stride(0),
-                A.stride(1),
-                A_fp4.stride(0),
-                A_fp4.stride(1),
-                A_scale.stride(0),
-                A_scale.stride(1),
-                M=M,
-                N=K,
-                BLOCK_SIZE_M=kp['Q_BSM'],
-                BLOCK_SIZE_N=kp['Q_BSN'],
-                NUM_ITER=kp['Q_NUM_ITER'],
-                NUM_STAGES=kp['Q_NUM_STAGES'],
-                MXFP4_QUANT_BLOCK_SIZE=32,
-                SCALING_MODE=0,
-                num_warps=kp['Q_NUM_WARPS'],
-                waves_per_eu=0,
-                num_stages=1,
-            )
-
-            # Step 2: afp4wfp4_preshuffle GEMM with XCD remap
-            _gemm_afp4wfp4_preshuffle_kernel[(kp['grid_size'],)](
-                A_fp4,
-                buf['B_w'],
-                y_pp,
-                A_scale,
-                buf['B_sc'],
-                M,
-                N,
-                kp['K_kernel'],
-                A_fp4.stride(0),
-                A_fp4.stride(1),
-                buf['B_w'].stride(0),
-                buf['B_w'].stride(1),
-                y_pp.stride(0),
-                y_pp.stride(1),
-                y_pp.stride(2),
-                A_scale.stride(0),
-                A_scale.stride(1),
-                buf['B_sc'].stride(0),
-                buf['B_sc'].stride(1),
-                BLOCK_SIZE_M=kp['BLOCK_SIZE_M'],
-                BLOCK_SIZE_N=kp['BLOCK_SIZE_N'],
-                BLOCK_SIZE_K=kp['BLOCK_SIZE_K'],
-                GROUP_SIZE_M=kp['GROUP_SIZE_M'],
-                NUM_KSPLIT=kp['NUM_KSPLIT'],
-                SPLITK_BLOCK_SIZE=kp['SPLITK_BLOCK_SIZE'],
-                num_warps=kp['num_warps'],
-                num_stages=kp['num_stages'],
-                waves_per_eu=kp['waves_per_eu'],
-                matrix_instr_nonkdim=kp['matrix_instr_nonkdim'],
-                cache_modifier=kp['cache_modifier'],
-            )
-        else:
-            # Original a16wfp4_preshuffle path with inline PREQUANT
-            b_ptr = B_shuffle.data_ptr()
-            if buf['B_w'] is None or buf.get('_b_ptr') != b_ptr:
-                buf['B_w'] = B_shuffle.view(torch.uint8).reshape(N // 16, (K // 2) * 16)
-                bs_shape = B_scale_sh.shape
-                buf['B_sc'] = B_scale_sh.view(torch.uint8).reshape(
-                    bs_shape[0] // 32, bs_shape[1] * 32
-                )
-                buf['_b_ptr'] = b_ptr
-
-            _gemm_a16wfp4_preshuffle_kernel[(kp['grid_size'],)](
-                A,
-                buf['B_w'],
-                y_pp,
-                buf['B_sc'],
-                M,
-                N,
-                kp['K_kernel'],
-                A.stride(0),
-                A.stride(1),
-                buf['B_w'].stride(0),
-                buf['B_w'].stride(1),
-                y_pp.stride(0),
-                y_pp.stride(1),
-                y_pp.stride(2),
-                buf['B_sc'].stride(0),
-                buf['B_sc'].stride(1),
-                BLOCK_SIZE_M=kp['BLOCK_SIZE_M'],
-                BLOCK_SIZE_N=kp['BLOCK_SIZE_N'],
-                BLOCK_SIZE_K=kp['BLOCK_SIZE_K'],
-                GROUP_SIZE_M=kp['GROUP_SIZE_M'],
-                NUM_KSPLIT=kp['NUM_KSPLIT'],
-                SPLITK_BLOCK_SIZE=kp['SPLITK_BLOCK_SIZE'],
-                num_warps=kp['num_warps'],
-                num_stages=kp['num_stages'],
-                waves_per_eu=kp['waves_per_eu'],
-                matrix_instr_nonkdim=kp['matrix_instr_nonkdim'],
-                PREQUANT=True,
-                cache_modifier=kp['cache_modifier'],
-            )
+        _gemm_a16wfp4_preshuffle_kernel[(kp['grid_size'],)](
+            A,
+            buf['B_w'],
+            y_pp,
+            buf['B_sc'],
+            M,
+            N,
+            kp['K_kernel'],
+            A.stride(0),
+            A.stride(1),
+            buf['B_w'].stride(0),
+            buf['B_w'].stride(1),
+            y_pp.stride(0),
+            y_pp.stride(1),
+            y_pp.stride(2),
+            buf['B_sc'].stride(0),
+            buf['B_sc'].stride(1),
+            BLOCK_SIZE_M=kp['BLOCK_SIZE_M'],
+            BLOCK_SIZE_N=kp['BLOCK_SIZE_N'],
+            BLOCK_SIZE_K=kp['BLOCK_SIZE_K'],
+            GROUP_SIZE_M=kp['GROUP_SIZE_M'],
+            NUM_KSPLIT=kp['NUM_KSPLIT'],
+            SPLITK_BLOCK_SIZE=kp['SPLITK_BLOCK_SIZE'],
+            num_warps=kp['num_warps'],
+            num_stages=kp['num_stages'],
+            waves_per_eu=kp['waves_per_eu'],
+            matrix_instr_nonkdim=kp['matrix_instr_nonkdim'],
+            PREQUANT=True,
+            cache_modifier=kp['cache_modifier'],
+        )
 
         _gluon_reduce_kernel[kp['reduce_grid']](
             y_pp,
