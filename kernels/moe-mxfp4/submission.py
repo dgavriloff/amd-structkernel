@@ -2,15 +2,15 @@
 #!POPCORN gpu MI355X
 
 """
-v133: FlyDSL stage1 t32x256x256 for bs512/E33/d=2048 via ck_moe_stage1 redirect.
-v072 failed with MLIR codegen bug. Server may have newer aiter now.
-Gate-up GEMM: M=~139 tokens/expert, N=2*2048=4096, K=7168.
-FlyDSL stage1 may be faster than CK 4-WG M128 by using different tile scheduling.
+v134: FlyDSL t16x256x128_atomic stage2 for d=2048.
+tile_m=16 (vs 32 in v127) doubles M-subtiles from 4 to 8 per block_m=128.
+More M-level parallelism. tile_m*tile_k=16*128=2048, divisible by 256 (OK).
+Keep d=512 as t32x128x128 (v125 winner).
 """
 import os
 import functools
 import torch
-from typing import Dict, Optional
+from typing import Dict
 from task import input_t, output_t
 
 from aiter import ActivationType, QuantType
@@ -28,10 +28,9 @@ _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomi
     "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
     "tile_m": 32, "tile_n": 256, "tile_k": 128, "mode": "atomic", "MPerBlock": 32,
 }
-# Register FlyDSL stage1 kernel (for redirect monkeypatch)
-_flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe1_afp4_wfp4_bf16_t32x256x256"] = {
-    "stage": 1, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
-    "tile_m": 32, "tile_n": 256, "tile_k": 256, "MPerBlock": 32,
+_flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"] = {
+    "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
+    "tile_m": 16, "tile_n": 256, "tile_k": 128, "mode": "atomic", "MPerBlock": 16,
 }
 
 # Inject ksplit=2 configs for shapes that benefit from cktile_moe path
@@ -95,13 +94,13 @@ _4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v
 _FLYDSL_STAGE2 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x256_atomic"
 _FLYDSL_STAGE2_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"
 _FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
-_FLYDSL_STAGE1 = "flydsl_moe1_afp4_wfp4_bf16_t32x256x256"
+_FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
 
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 128,
     "ksplit": 0,
-    "kernelName1": "ck2stages_FLYDSL_REDIRECT_" + _FLYDSL_STAGE1,  # v133: FlyDSL stage1
-    "kernelName2": _FLYDSL_STAGE2_N256_K128,  # v127: tile_n=256, tile_k=128 for d=2048
+    "kernelName1": _4WG_STAGE1_M128,
+    "kernelName2": _FLYDSL_STAGE2_M16_N256_K128,  # v134: tile_m=16 for more M-parallelism
     "run_1stage": False,
 }
 
@@ -127,62 +126,13 @@ _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "use_non_temporal_load": True,  # custom flag, read by monkeypatch
 }
 
-# Save original ck_moe_stage1 for redirect
-_orig_ck_moe_stage1 = None
-
-def _patched_ck_moe_stage1(
-    hidden_states, w1, w2,
-    sorted_token_ids, sorted_expert_ids, num_valid_ids,
-    out, topk, block_m=32, a1_scale=None, w1_scale=None,
-    kernelName="", sorted_weights=None,
-    quant_type=QuantType.No, activation=ActivationType.Gelu,
-    splitk=1, use_non_temporal_load=False, dtype=None,
-):
-    if kernelName and "FLYDSL_REDIRECT" in kernelName:
-        real_name = kernelName.split("FLYDSL_REDIRECT_")[1]
-        parsed = _flydsl_moe_kernels.get_flydsl_kernel_params(real_name)
-        if parsed is None:
-            raise ValueError(f"Invalid FlyDSL stage1 kernel name: {real_name}")
-        import aiter.ops.flydsl as flydsl_mod
-        flydsl_mod.flydsl_moe_stage1(
-            a=hidden_states,
-            w1=w1,
-            sorted_token_ids=sorted_token_ids,
-            sorted_expert_ids=sorted_expert_ids,
-            num_valid_ids=num_valid_ids,
-            out=out,
-            topk=topk,
-            tile_m=parsed["tile_m"],
-            tile_n=parsed["tile_n"],
-            tile_k=parsed["tile_k"],
-            a_dtype=parsed["a_dtype"],
-            b_dtype=parsed["b_dtype"],
-            out_dtype=parsed["out_dtype"],
-            w1_scale=w1_scale,
-            a1_scale=a1_scale,
-            sorted_weights=sorted_weights,
-        )
-        return
-    return _orig_ck_moe_stage1(
-        hidden_states, w1, w2,
-        sorted_token_ids, sorted_expert_ids, num_valid_ids,
-        out, topk, block_m, a1_scale, w1_scale,
-        kernelName, sorted_weights, quant_type, activation,
-        splitk, use_non_temporal_load, dtype,
-    )
-
 _injected = False
 
 def _inject_configs():
-    global _injected, _orig_ck_moe_stage1
+    global _injected
     if _injected:
         return
     _injected = True
-
-    # Monkeypatch ck_moe_stage1 for FlyDSL redirect
-    _orig_ck_moe_stage1 = _fused_moe_module.ck_moe_stage1
-    _fused_moe_module.ck_moe_stage1 = _patched_ck_moe_stage1
-    _fused_moe_module.get_2stage_cfgs.cache_clear()
 
     if _fused_moe_module.cfg_2stages is None:
         import pandas as pd

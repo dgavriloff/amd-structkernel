@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v127: FlyDSL t32x256x128_atomic stage2 for d=2048.
-v126 showed tile_k=128 is optimal. Try tile_n=256 to increase N-parallelism.
-d=2048 has N=7168 -> 7168/128=56 N-tiles with tile_n=128, or 28 with tile_n=256.
+v134: FlyDSL t16x256x128_atomic stage2 for d=2048.
+tile_m=16 (vs 32 in v127) doubles M-subtiles from 4 to 8 per block_m=128.
+More M-level parallelism. tile_m*tile_k=16*128=2048, divisible by 256 (OK).
 Keep d=512 as t32x128x128 (v125 winner).
 """
 import os
@@ -27,6 +27,10 @@ _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomi
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"] = {
     "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
     "tile_m": 32, "tile_n": 256, "tile_k": 128, "mode": "atomic", "MPerBlock": 32,
+}
+_flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"] = {
+    "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
+    "tile_m": 16, "tile_n": 256, "tile_k": 128, "mode": "atomic", "MPerBlock": 16,
 }
 
 # Inject ksplit=2 configs for shapes that benefit from cktile_moe path
@@ -90,12 +94,13 @@ _4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v
 _FLYDSL_STAGE2 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x256_atomic"
 _FLYDSL_STAGE2_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"
 _FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
+_FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
 
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 128,
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_N256_K128,  # v127: tile_n=256, tile_k=128 for d=2048
+    "kernelName2": _FLYDSL_STAGE2_M16_N256_K128,  # v134: tile_m=16 for more M-parallelism
     "run_1stage": False,
 }
 
