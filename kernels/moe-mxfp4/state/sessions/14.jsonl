@@ -9,3 +9,4 @@
 {"action": "submit", "mode": "leaderboard", "v": 144, "score": 133.26, "best": 133.81, "kept": true, "ts": "2026-03-17T08:10:43.312614+00:00Z"}
 {"action": "propose", "what": "doweight_stage1=True to fuse routing weight multiplication into stage1 kernel", "why": "Currently doweight_stage1=False means routing weights are applied in stage2. Moving weight multiplication to stage1 can reduce stage2 work. The tuned CSV has doweight_stage1=0 but this may not be optimal for our shapes. CK stage1 kernel names have 'MulRoutedWeight0' (=False) vs 'MulRoutedWeight1' (=True).", "keywords": ["doweight", "routing", "stage1", "weight"], "prior_matches": 0, "ts": "2026-03-17T08:11:11.745180+00:00Z"}
 {"action": "submit", "mode": "test", "v": 145, "result": "fail", "ts": "2026-03-17T08:12:39.614618+00:00Z"}
+{"action": "submit", "mode": "test", "v": 145, "result": "pass", "ts": "2026-03-17T08:16:38.948842+00:00Z"}
