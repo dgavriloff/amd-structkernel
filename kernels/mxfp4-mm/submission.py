@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v201: M=64 waves_per_eu=2 (from 1) with .cg cache modifier preserved.
+v211: M<=32 K<=1024 cache_modifier=None (from .cg).
 
-v80 tested waves_per_eu=2 + cache_modifier=None together (confounded, neutral).
-waves_per_eu=2 alone with .cg has never been tested for M=64 specifically.
+For K=512 BSM=8 BSN=128 BSK=256, B data per block is 32KB FP4.
+Without .cg, L1 caching improves latency for 2 K-iterations.
+AMD library default uses null for this config.
 """
 import torch
 import triton
@@ -92,7 +93,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": ".cg",
+            "cache_modifier": None,
             "NUM_KSPLIT": 1,
         }
     elif M <= 32:

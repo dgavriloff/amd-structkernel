@@ -2,8 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v127: Reduce stage2 num_warps from 4 to 1 — stage2 reads only NSPLIT values per workgroup,
-doesn't need 4 warps. Fewer warps = less VGPR usage = better occupancy for small reduction.
+v126: Remove unnecessary .to(tl.int64) cast in FP8 V load offset computation.
+Max offset = 256*8192*576+511 = ~1.2B < 2^31, so int32 suffices.
+Int64 ops are 2x slower on CDNA ALUs — removing saves compute in inner loop.
 """
 
 import torch
@@ -102,7 +103,7 @@ def _stage1(
         l_i = l_i * alpha + tl.sum(p, axis=0)
         acc_v = acc_v * alpha
 
-        fp8_offsets = (kg[:, None] * FP8_STRIDE + ov[None, :]).to(tl.int64)
+        fp8_offsets = kg[:, None] * FP8_STRIDE + ov[None, :]
         vfp8 = tl.load(KV_fp8 + fp8_offsets,
                         mask=nm[:, None], other=0.0)
         v_f32 = vfp8.to(tl.float32) * fp8_scale
@@ -205,7 +206,7 @@ def custom_kernel(data: input_t) -> output_t:
     _stage2[(bs, NUM_HEADS)](
         mid_v, mid_lse, o, qo_indptr,
         NSPLIT=NSPLIT, NHEADS=NUM_HEADS, V_DIM=V_HEAD_DIM,
-        num_warps=1,
+        num_warps=4,
     )
 
     return o
