@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v138: FlyDSL t16x128x128_atomic stage2 for BOTH d=512 AND d=2048.
-tile_m=16 helps both shapes. d=512: 126->112us (-11%) in v137 BM.
-d=2048: noise-level parity in v136. Combined for cumulative BM improvement.
+v141: cktile_moe ksplit=2 for bs512/E257 instead of CK 2-stage + NT=True.
+Remove the custom CK kernel override for E=257/bs=512. Use cktile_moe path
+instead, consistent with smaller batch E=257 shapes.
 """
 import os
 import functools
@@ -118,16 +118,15 @@ _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
     "run_1stage": False,
 }
 
-# === bs=512/E=257: inject tuned CSV kernels + NT=True ===
-# Heuristic says NT=True for 17 tokens/expert, but tuned CSV path always sets NT=False.
-# Inject the same kernel names as tuned CSV but add use_non_temporal_load flag.
+# === bs=512/E=257: cktile_moe ksplit=2 (v141) ===
+# Switch from CK 2-stage + NT to cktile_moe with ksplit=2, consistent with
+# smaller batch E=257 shapes. block_m=16 matches bs=16 and bs=128 E=257 configs.
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
-    "block_m": 32,
-    "ksplit": 0,
-    "kernelName1": "moe_ck2stages_gemm1_64x32x32x128_1x1_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
-    "kernelName2": "moe_ck2stages_gemm2_64x32x32x128_1x1_MulABScaleExpertWeightShuffled_v1_Nswizzle0_Quant3_MulRoutedWeight1_FP4X2_FP4X2_B16",
+    "block_m": 16,
+    "ksplit": 2,
+    "kernelName1": "",
+    "kernelName2": "",
     "run_1stage": False,
-    "use_non_temporal_load": True,  # custom flag, read by monkeypatch
 }
 
 _injected = False

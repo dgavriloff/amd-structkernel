@@ -14,3 +14,6 @@
 {"action": "submit", "mode": "test", "v": 140, "result": "pass", "ts": "2026-03-17T07:07:13.297082+00:00Z"}
 {"action": "submit", "mode": "leaderboard", "v": 140, "score": 136.33, "best": 135.73, "kept": false, "ts": "2026-03-17T07:14:51.562059+00:00Z"}
 {"action": "propose", "what": "cktile_moe ksplit=2 for bs512/E257 instead of CK 2-stage + NT=True", "why": "v22 tried cktile ksplit=2 for bs=512/E=257 but was +2.1% worse at the time. Since then, many other changes may have shifted the landscape. Also secret LB seems to weight shapes differently. Re-evaluate.", "keywords": ["cktile", "ksplit", "tile-config"], "prior_matches": 4, "ts": "2026-03-17T07:15:29.702880+00:00Z", "override": "v22 was 130+ versions ago with completely different d=512 and d=2048 configs. The current baseline has changed dramatically. Re-evaluating for current code."}
+{"action": "submit", "mode": "test", "v": 141, "result": "pass", "ts": "2026-03-17T07:19:21.366024+00:00Z"}
+{"action": "submit", "mode": "leaderboard", "v": 141, "score": 138.39, "best": 135.73, "kept": false, "ts": "2026-03-17T07:26:52.613917+00:00Z"}
+{"action": "close", "what_failed": "FlyDSL tile variations (t16x128x256, t16x256x256, cktile for E257/bs512)", "reverts": 5, "keeps": 1, "ts": "2026-03-17T07:27:20.001757+00:00Z"}

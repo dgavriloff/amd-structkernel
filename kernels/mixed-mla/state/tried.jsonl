@@ -105,3 +105,4 @@
 {"v": 103, "what": "bf16_persist page_size=128 for bs=32 only (bs=4 failed in v102)", "keywords": ["bf16", "page-size"], "score": 16.1, "kept": false, "reason": "tolerance fail bs=32,kv=8k"}
 {"v": 104, "what": "intra_batch_mode=False for bf16_persist bs<=4 (better CU utilization for few blocks)", "keywords": ["bf16", "scheduling"], "score": 21.9, "kept": false, "reason": "0%, secret LB fail"}
 {"v": 105, "what": "a8w8 non-persistent with GPU-only Q quantization (abs+amax+div+cast, no CPU sync)", "keywords": ["a8w8", "non-persistent", "persistent", "quant"], "score": 96.6, "kept": false, "reason": "+285% for target shape"}
+{"v": 110, "what": "Custom Triton flash-decoding kernel with MXFP4 KV cache dequant fused into attention (4x bandwidth savings)", "keywords": ["mxfp4", "triton", "custom-kernel", "flash-decoding", "fused-dequant"], "score": 128.14, "kept": false, "reason": "+450.0% vs best", "session": 12}
