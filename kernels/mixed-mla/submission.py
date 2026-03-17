@@ -2,10 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v120: Cache intermediate buffers to eliminate torch.empty overhead per call.
-- Cache mid_v, mid_lse, o buffers keyed by (tq, NSPLIT) — reused across iterations.
-- Pass q directly without .view() — kernel uses manual offsets anyway.
-- Inline all Python-side constants to reduce overhead.
+v121: Load fp8_scale inside kernel from tensor pointer to avoid .item() GPU-CPU sync.
+- Pass fp8_scale as tensor pointer, load scalar inside kernel.
+- Keep buffer caching from v120.
 - Keep MXFP4 K + FP8 V, adaptive NSPLIT (8/16), BN=64.
 """
 
@@ -28,7 +27,7 @@ _buf_cache = {}
 def _stage1(
     Q, KV_pk, KV_sc, KV_fp8, kv_indptr, qo_indptr,
     Mid_v, Mid_lse,
-    fp8_scale,
+    FP8_SCALE_PTR,
     NSPLIT: tl.constexpr,
     BN: tl.constexpr,
     NHEADS: tl.constexpr,
@@ -64,6 +63,9 @@ def _stage1(
         ov = tl.arange(0, V_DIM)
         tl.store(Mid_v + v_off + ov, tl.zeros([V_DIM], dtype=tl.bfloat16))
         return
+
+    # Load fp8 scale from device memory (avoids .item() CPU sync)
+    fp8_scale = tl.load(FP8_SCALE_PTR).to(tl.float32)
 
     ok = tl.arange(0, QK_P)
     q_vec = tl.load(Q + qi * NHEADS * QK_DIM + hid * QK_DIM + ok,
@@ -161,7 +163,8 @@ def custom_kernel(data: input_t) -> output_t:
 
     kv_fp8_raw, kv_fp8_scale = kv_data["fp8"]
     kv_fp8 = kv_fp8_raw.view(torch.float8_e4m3fnuz).reshape(kv_fp8_raw.shape[0], -1)
-    fp8_scale_val = kv_fp8_scale.item() if kv_fp8_scale.numel() == 1 else 1.0
+    # Pass scale tensor pointer to kernel (avoids .item() GPU-CPU sync)
+    fp8_scale_tensor = kv_fp8_scale.view(-1)
 
     PKD = kv_pk.shape[-1]
     N_SC = kv_sc.shape[-1]
@@ -170,7 +173,7 @@ def custom_kernel(data: input_t) -> output_t:
     max_kv = int(kv_indptr[-1].item() - kv_indptr[0].item()) // max(bs, 1)
     NSPLIT = 8 if max_kv <= 2048 else 16
 
-    # Cache intermediate buffers — same shape reused across iterations
+    # Cache intermediate buffers
     buf_key = (tq, NSPLIT)
     if buf_key not in _buf_cache:
         n_mid_v = tq * NSPLIT * NUM_HEADS * V_HEAD_DIM
@@ -185,7 +188,7 @@ def custom_kernel(data: input_t) -> output_t:
         q, kv_pk, kv_sc, kv_fp8,
         kv_indptr, qo_indptr,
         mid_v, mid_lse,
-        fp8_scale_val,
+        fp8_scale_tensor,
         NSPLIT=NSPLIT, BN=64, NHEADS=NUM_HEADS,
         QK_DIM=QK_HEAD_DIM, V_DIM=V_HEAD_DIM,
         FP8_STRIDE=FP8_STRIDE,

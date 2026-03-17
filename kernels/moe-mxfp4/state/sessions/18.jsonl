@@ -13,3 +13,4 @@
 {"action": "submit", "mode": "leaderboard", "v": 151, "score": 132.6, "best": 131.75, "kept": false, "ts": "2026-03-17T09:52:56.567593+00:00Z"}
 {"action": "propose", "what": "use_non_temporal_load=False for bs=512/E=33 shapes (d=512 and d=2048)", "why": "Default NT=True may cause cache thrashing for bs=512/E=33 which has ~14 tokens/expert. With block_m=128, tokens are reused across tile iterations. NT loads bypass cache, preventing this reuse. Try NT=False to keep data in L2.", "keywords": ["non-temporal", "cache", "e33", "bs512"], "prior_matches": 0, "ts": "2026-03-17T09:59:51.531477+00:00Z"}
 {"action": "submit", "mode": "test", "v": 152, "result": "pass", "ts": "2026-03-17T10:06:00.097743+00:00Z"}
+{"action": "submit", "mode": "leaderboard", "v": 152, "score": 132.78, "best": 131.75, "kept": false, "ts": "2026-03-17T10:15:25.618296+00:00Z"}

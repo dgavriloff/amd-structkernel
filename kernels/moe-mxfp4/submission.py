@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v152: use_non_temporal_load=False for bs=512/E=33 shapes (d=512 and d=2048).
-NT=True bypasses cache. With ~14 tokens/expert and block_m=128, activation data
-may benefit from L2 caching. Also try for bs=128/E=33.
+v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
+Same approach that improved bs=512/E=33 significantly in v138.
+Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
 """
 import os
 import functools
@@ -65,7 +65,6 @@ _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
     "kernelName1": "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
     "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic",
     "run_1stage": False,
-    "use_non_temporal_load": False,  # v152: keep data in L2
 }
 
 # === E=257 shapes (NEW in v020) ===
@@ -108,7 +107,6 @@ _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "kernelName1": _4WG_STAGE1_M128,
     "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
     "run_1stage": False,
-    "use_non_temporal_load": False,  # v152: keep data in L2
 }
 
 # === bs=512/E=33/d=512: block_m=128 + 4-WG M128 stage1 + FlyDSL stage2 ===
@@ -119,7 +117,6 @@ _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
     "kernelName1": _4WG_STAGE1_M128,
     "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=512
     "run_1stage": False,
-    "use_non_temporal_load": False,  # v152: keep data in L2
 }
 
 # === bs=512/E=257: 4-WG CK stage1 + FlyDSL stage2 ===
