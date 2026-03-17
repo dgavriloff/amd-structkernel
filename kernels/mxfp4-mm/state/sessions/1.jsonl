@@ -1,0 +1,1 @@
+{"action": "propose", "what": "fused quant+GEMM", "why": "eliminate intermediate buffer write", "keywords": ["fused", "quant", "gemm"], "prior_matches": 0, "ts": "2026-03-17T03:12:59.025817+00:00Z"}

@@ -1,6 +1,3 @@
-# State sessions (ephemeral, per-agent)
-kernels/*/state/sessions/
-
 # Python
 __pycache__/
 *.pyc

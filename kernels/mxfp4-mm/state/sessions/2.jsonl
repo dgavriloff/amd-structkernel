@@ -1,0 +1,1 @@
+{"action": "propose", "what": "fused quant+GEMM v2", "why": "different tile size", "keywords": ["fused", "quant", "gemm"], "prior_matches": 0, "ts": "2026-03-17T03:12:59.459838+00:00Z"}
