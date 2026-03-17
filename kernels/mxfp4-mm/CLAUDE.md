@@ -2,7 +2,7 @@
 
 ## Workflow
 1. Read `problem.md` and `submission.py`
-2. Form a hypothesis based on the code and problem constraints
+2. Form a hypothesis. Use the full extent of your abilities — read source code, clone repos, search the web, analyze ISA references, disassemble binaries, study papers, whatever it takes to find a path forward
 3. `./tools/propose.sh --what "..." --why "..." --keywords "k1,k2,k3"`
    - If prior attempts found: prints them, exits 1
    - Use `--override "reason this is different"` to proceed anyway
