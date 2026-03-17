@@ -2,9 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v210: Eliminate B_w/B_sc data_ptr caching — always compute views inline.
-On LB (recheck=True), data_ptr changes every call so cache always misses.
-Precompute strides in buffer dict, compute views inline to avoid dict mutation overhead.
+v201: M=64 waves_per_eu=2 (from 1) with .cg cache modifier preserved.
+
+v80 tested waves_per_eu=2 + cache_modifier=None together (confounded, neutral).
+waves_per_eu=2 alone with .cg has never been tested for M=64 specifically.
 """
 import torch
 import triton
@@ -278,21 +279,14 @@ def _get_or_create_buffers(M, K, N, device):
     if key not in _buffers:
         if M <= _FUSED_M_THRESHOLD:
             config = _get_fused_config(M, N, K)
-            # Precompute B_w/B_sc shapes and strides
-            bw_rows = N // 16
-            bw_cols = (K // 2) * 16
-            bw_stride0 = bw_cols
-            bw_stride1 = 1
-
             if config["NUM_KSPLIT"] > 1:
                 # Split-K path: use direct dispatch with tuned reduce kernel
                 splitk_params = _prepare_splitk_dispatch(M, N, K, config, device)
                 _buffers[key] = {
                     'mode': 'fused_splitk',
                     'out': torch.empty((M, N), dtype=torch.bfloat16, device=device),
-                    'bw_shape': (bw_rows, bw_cols),
-                    'bw_stride0': bw_stride0,
-                    'bw_stride1': bw_stride1,
+                    'B_w': None,
+                    'B_sc': None,
                     'splitk_params': splitk_params,
                 }
             else:
@@ -308,9 +302,8 @@ def _get_or_create_buffers(M, K, N, device):
                 _buffers[key] = {
                     'mode': 'fused_direct',
                     'out': torch.empty((M, N), dtype=torch.bfloat16, device=device),
-                    'bw_shape': (bw_rows, bw_cols),
-                    'bw_stride0': bw_stride0,
-                    'bw_stride1': bw_stride1,
+                    'B_w': None,
+                    'B_sc': None,
                     'grid_size': grid_size,
                     'K_kernel': K_kernel,
                     'BLOCK_SIZE_M': BSM,
@@ -372,12 +365,15 @@ def custom_kernel(data: input_t) -> output_t:
     buf = _get_or_create_buffers(M, K, N, A.device)
 
     if buf['mode'] == 'fused_splitk':
-        # Split-K path — compute B views inline (no caching, avoids data_ptr check)
-        B_w = B_shuffle.view(torch.uint8).reshape(buf['bw_shape'])
-        bs_shape = B_scale_sh.shape
-        B_sc = B_scale_sh.view(torch.uint8).reshape(
-            bs_shape[0] // 32, bs_shape[1] * 32
-        )
+        # Split-K path with tuned reduce kernel (REDUCE_BSN=16)
+        b_ptr = B_shuffle.data_ptr()
+        if buf['B_w'] is None or buf.get('_b_ptr') != b_ptr:
+            buf['B_w'] = B_shuffle.view(torch.uint8).reshape(N // 16, (K // 2) * 16)
+            bs_shape = B_scale_sh.shape
+            buf['B_sc'] = B_scale_sh.view(torch.uint8).reshape(
+                bs_shape[0] // 32, bs_shape[1] * 32
+            )
+            buf['_b_ptr'] = b_ptr
 
         kp = buf['splitk_params']
         out = buf['out']
@@ -385,21 +381,21 @@ def custom_kernel(data: input_t) -> output_t:
 
         _gemm_a16wfp4_preshuffle_kernel[(kp['grid_size'],)](
             A,
-            B_w,
+            buf['B_w'],
             y_pp,
-            B_sc,
+            buf['B_sc'],
             M,
             N,
             kp['K_kernel'],
             A.stride(0),
             A.stride(1),
-            buf['bw_stride0'],
-            buf['bw_stride1'],
+            buf['B_w'].stride(0),
+            buf['B_w'].stride(1),
             y_pp.stride(0),
             y_pp.stride(1),
             y_pp.stride(2),
-            B_sc.stride(0),
-            B_sc.stride(1),
+            buf['B_sc'].stride(0),
+            buf['B_sc'].stride(1),
             BLOCK_SIZE_M=kp['BLOCK_SIZE_M'],
             BLOCK_SIZE_N=kp['BLOCK_SIZE_N'],
             BLOCK_SIZE_K=kp['BLOCK_SIZE_K'],
@@ -433,32 +429,35 @@ def custom_kernel(data: input_t) -> output_t:
         return out
 
     elif buf['mode'] == 'fused_direct':
-        # Non-split-K fused path — compute B views inline (no caching)
-        B_w = B_shuffle.view(torch.uint8).reshape(buf['bw_shape'])
-        bs_shape = B_scale_sh.shape
-        B_sc = B_scale_sh.view(torch.uint8).reshape(
-            bs_shape[0] // 32, bs_shape[1] * 32
-        )
+        # Non-split-K fused path: direct kernel dispatch (bypass wrapper)
+        b_ptr = B_shuffle.data_ptr()
+        if buf['B_w'] is None or buf.get('_b_ptr') != b_ptr:
+            buf['B_w'] = B_shuffle.view(torch.uint8).reshape(N // 16, (K // 2) * 16)
+            bs_shape = B_scale_sh.shape
+            buf['B_sc'] = B_scale_sh.view(torch.uint8).reshape(
+                bs_shape[0] // 32, bs_shape[1] * 32
+            )
+            buf['_b_ptr'] = b_ptr
 
         out = buf['out']
 
         _gemm_a16wfp4_preshuffle_kernel[(buf['grid_size'],)](
             A,
-            B_w,
+            buf['B_w'],
             out,
-            B_sc,
+            buf['B_sc'],
             M,
             N,
             buf['K_kernel'],
             A.stride(0),
             A.stride(1),
-            buf['bw_stride0'],
-            buf['bw_stride1'],
+            buf['B_w'].stride(0),
+            buf['B_w'].stride(1),
             0,  # stride_ck (no split-K)
             out.stride(0),
             out.stride(1),
-            B_sc.stride(0),
-            B_sc.stride(1),
+            buf['B_sc'].stride(0),
+            buf['B_sc'].stride(1),
             BLOCK_SIZE_M=buf['BLOCK_SIZE_M'],
             BLOCK_SIZE_N=buf['BLOCK_SIZE_N'],
             BLOCK_SIZE_K=buf['BLOCK_SIZE_K'],
