@@ -3,8 +3,7 @@
 # Usage: ./tools/close_branch.sh --what-failed "..." [--dead-technique "..." --dead-reason "..."]
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-KERNEL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+KERNEL_DIR="$(pwd)"
 STATE_DIR="$KERNEL_DIR/state"
 DEAD_FILE="$STATE_DIR/dead.jsonl"
 SESSIONS_DIR="$STATE_DIR/sessions"

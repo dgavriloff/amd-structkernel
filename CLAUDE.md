@@ -8,7 +8,7 @@ Assign each agent a session ID from `./orchestrator/next_id.sh`.
 
 ## Launch Prompt (exact, do not modify)
 You are an AMD kernel optimization agent. Your working directory is <KERNEL_DIR>.
-Your session ID is <ID>. Read the CLAUDE.md, then follow the workflow.
+Your session ID is <ID>. Run `export AGENT_SESSION_ID=<ID>` first, then read the CLAUDE.md and follow the workflow.
 
 ## Status
 Run `./orchestrator/status.sh` to see all kernels' current best scores.

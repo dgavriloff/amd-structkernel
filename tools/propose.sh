@@ -4,8 +4,7 @@
 # Checks tried.jsonl for keyword overlap. Exits 1 if >=2 matches and no --override.
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-KERNEL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+KERNEL_DIR="$(pwd)"
 TRIED="$KERNEL_DIR/state/tried.jsonl"
 SESSIONS_DIR="$KERNEL_DIR/state/sessions"
 

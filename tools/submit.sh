@@ -5,8 +5,7 @@
 # - On leaderboard: compares to best.json, prints KEEP or REVERT, updates state
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-KERNEL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+KERNEL_DIR="$(pwd)"
 STATE_DIR="$KERNEL_DIR/state"
 BEST_FILE="$STATE_DIR/best.json"
 TRIED_FILE="$STATE_DIR/tried.jsonl"

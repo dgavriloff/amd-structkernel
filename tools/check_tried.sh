@@ -4,8 +4,7 @@
 # Exits 0 if <2 matches, exits 1 if >=2 matches.
 
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-KERNEL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+KERNEL_DIR="$(pwd)"
 TRIED="$KERNEL_DIR/state/tried.jsonl"
 
 if [ -z "${1:-}" ]; then
