@@ -39,11 +39,16 @@ Each launched subagent runs inside its own tmux session.
 Each kernel records subagent lifecycle in `state/subagents.jsonl`.
 When a kernel agent closes its session, `./tools/close_branch.sh` will trigger tmux cleanup for that agent session.
 After cleanup, the helper will send a notification into the orchestrator tmux session that a subagent finished.
+After launching the required workers and confirming they are running, the orchestrator should return to an idle waiting state at the shell prompt.
+It is correct for the orchestrator to do nothing while waiting for a subagent-finished notification.
 
 ## Rules
+- Do not write or modify code as part of orchestration.
+- Do not create new scripts, daemons, watchdogs, polling loops, or background supervisors.
 - Never add context to the launch prompt.
 - Never summarize previous results to subagents.
 - Never stop on your own.
 - Use the tmux-backed launcher, not API-spawned subagents.
 - Keep exactly one live worker per kernel.
 - Treat tmux notifications about finished subagents as signals to reconcile and relaunch the affected kernel.
+- After relaunching a finished worker and confirming it is running, return to idle again.
