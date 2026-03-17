@@ -1,0 +1,3 @@
+{"action": "propose", "what": "Custom Triton flash-decoding kernel with MXFP4 KV cache dequant fused into attention (4x bandwidth savings)", "why": "Top 2 competitors achieve 4.3us vs our 23.3us. MXFP4 KV cache provides 4x memory bandwidth reduction. Fusing fp4 dequant into attention computation avoids materializing bf16 intermediate. This is a fundamentally different approach from tuning aiter ASM parameters.", "keywords": ["mxfp4", "triton", "custom-kernel", "flash-decoding", "fused-dequant"], "prior_matches": 0, "ts": "2026-03-17T06:48:34.889960+00:00Z"}
+{"action": "submit", "mode": "test", "v": 110, "result": "fail", "ts": "2026-03-17T07:04:29.322423+00:00Z"}
+{"action": "submit", "mode": "test", "v": 110, "result": "fail", "ts": "2026-03-17T07:07:44.325081+00:00Z"}

@@ -2,15 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v188: Gluon reduce kernel for split-K + .wt on M=256 quant stores.
-
-Hypothesis: Two changes targeting different paths:
-1. Replace Triton _gemm_afp4wfp4_reduce_kernel with gluon version for split-K
-   reduce (16x2112x7168). Gluon uses explicit gl.amd.cdna4.buffer_load/store
-   and DistributedLinearLayout for optimal data movement. REDUCE_BSN=64
-   (gluon default for fp32) vs current BSN=16.
-2. .wt cache modifier on M=256 quant fp4 stores — confirmed real -1.5 to -3%
-   on M=256 across 5 tests (v176/v177/v178/v182/v187).
+v193: cache_modifier=None for M=64 fused path (from .cg).
+AMD library tuned config for M<=64 uses null. .cg bypasses L1 but L1
+may be beneficial for B tile reuse with BSM=16/BSN=128/BSK=256.
 """
 import torch
 import triton
@@ -116,6 +110,7 @@ def _get_fused_config(M, N, K):
     else:
         # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
+        # cache_modifier=None (library tuned config for M<=64)
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
@@ -125,7 +120,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 1,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": ".cg",
+            "cache_modifier": None,
             "NUM_KSPLIT": 1,
         }
 

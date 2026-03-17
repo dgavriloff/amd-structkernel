@@ -62,34 +62,38 @@ print(json.dumps(d))
 " >> "$SESSION_FILE"
 
 elif [ "$MODE" = "leaderboard" ]; then
-    # Extract ranked geomean from output
-    SCORE=$(echo "$RESULT" | grep -i "ranked.*geomean\|geomean.*ranked" | grep -oE '[0-9]+\.[0-9]+' | tail -1 || echo "")
-    if [ -z "$SCORE" ]; then
-        SCORE=$(echo "$RESULT" | grep -i "geomean" | grep -oE '[0-9]+\.[0-9]+' | tail -1 || echo "")
-    fi
-
-    # Fallback: compute geomean from Ranked Benchmark ⏱ lines
-    if [ -z "$SCORE" ]; then
-        SCORE=$(echo "$RESULT" | python3 -c "
+    # Compute geomean from Ranked Benchmark ⏱ lines
+    SCORE=$(echo "$RESULT" | python3 -c "
 import sys, re, math
 text = sys.stdin.read()
 # Find the Ranked Benchmark section
 idx = text.find('Ranked Benchmark')
 if idx == -1:
+    idx = text.find('ranked benchmark')
+if idx == -1:
+    idx = text.find('Ranked benchmark')
+if idx == -1:
+    print('ERROR: No Ranked Benchmark section found in output', file=sys.stderr)
     sys.exit(1)
 ranked_section = text[idx:]
-# Extract ⏱ times (mean values)
-times = re.findall(r'⏱\s+([0-9]+\.[0-9]+)\s+±', ranked_section)
+# Extract mean times: ⏱ 91.6 ± ... µs
+times = re.findall(r'⏱\s+([0-9]+(?:\.[0-9]+)?)\s*±', ranked_section)
 if not times:
+    # Fallback: any number before ± in the ranked section
+    times = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*±', ranked_section)
+if not times:
+    print('ERROR: No timing values found in Ranked Benchmark section', file=sys.stderr)
     sys.exit(1)
 times = [float(t) for t in times]
 geomean = math.exp(sum(math.log(t) for t in times) / len(times))
 print(f'{geomean:.2f}')
-" 2>/dev/null || echo "")
-    fi
+" || echo "")
 
     if [ -z "$SCORE" ]; then
         echo "WARNING: Could not extract score from output."
+        echo "DEBUG: Dumping first 100 lines of RESULT:"
+        echo "$RESULT" | head -100
+        echo "---END DEBUG---"
         echo "REVERT — could not parse score."
         python3 -c "
 import json, datetime
