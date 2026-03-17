@@ -39,7 +39,7 @@ if [ -z "$LEADERBOARD" ]; then
 fi
 
 # Get current version number from submission.py header
-VERSION=$(head -20 "$KERNEL_DIR/submission.py" | grep -oP 'v\d+' | head -1 | tr -d 'v' || echo "0")
+VERSION=$(head -20 "$KERNEL_DIR/submission.py" | grep -oE 'v[0-9]+' | head -1 | tr -d 'v' || echo "0")
 
 echo "=== Submitting in $MODE mode (v$VERSION) ==="
 
@@ -63,9 +63,9 @@ print(json.dumps(d))
 
 elif [ "$MODE" = "leaderboard" ]; then
     # Extract ranked geomean from output
-    SCORE=$(echo "$RESULT" | grep -i "ranked.*geomean\|geomean.*ranked" | grep -oP '[0-9]+\.[0-9]+' | tail -1 || echo "")
+    SCORE=$(echo "$RESULT" | grep -i "ranked.*geomean\|geomean.*ranked" | grep -oE '[0-9]+\.[0-9]+' | tail -1 || echo "")
     if [ -z "$SCORE" ]; then
-        SCORE=$(echo "$RESULT" | grep -i "geomean" | grep -oP '[0-9]+\.[0-9]+' | tail -1 || echo "")
+        SCORE=$(echo "$RESULT" | grep -i "geomean" | grep -oE '[0-9]+\.[0-9]+' | tail -1 || echo "")
     fi
 
     if [ -z "$SCORE" ]; then

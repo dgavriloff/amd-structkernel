@@ -6,7 +6,7 @@
 3. `./tools/propose.sh --what "..." --why "..." --keywords "k1,k2,k3"`
    - If prior attempts found: prints them, exits 1
    - Use `--override "reason this is different"` to proceed anyway
-4. Edit submission.py, archive to submissions/vNNN.py
+4. Get next version: `V=$(./tools/next_version.sh)`. Edit submission.py, archive: `cp submission.py submissions/v${V}_description.py`
 5. `./tools/submit.sh test`
 6. `./tools/submit.sh leaderboard`
 7. Output says KEEP or REVERT. Follow it.
