@@ -8,13 +8,17 @@
    - Use `--override "reason this is different"` to proceed anyway
 4. Get next version: `V=$(./tools/next_version.sh)`. Edit submission.py, archive: `cp submission.py submissions/v${V}_description.py`
 5. `./tools/submit.sh test`
-6. `./tools/submit.sh leaderboard`
-7. Output says KEEP or REVERT. Follow it.
-8. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
-9. Repeat from step 2, or if 5 reverts: `./tools/close_branch.sh`
+6. Use benchmark mode as the main ranking loop when quota is available. Use leaderboard mode sparingly as the scarcest confirmation resource.
+7. Only spend a leaderboard submission on the strongest current candidate. If leaderboard quota is exhausted, keep researching, benchmarking, and queueing the best next candidate instead of stopping.
+8. Treat `test` as the correctness gate, `bm` as the main search loop, and `leaderboard` as confirmation.
+9. Adapt to the limits reported by the tools. Do not assume fixed rates. If any quota is exhausted, switch to work that does not spend that quota.
+10. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
+11. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh`
 
 ## Rules
 - Never edit files in `state/`. The tools do that.
 - submit.sh rejects without a registered proposal.
 - Read source code of the component you plan to change before implementing.
 - Clone repos to `reference/cloned-repos/`. Check what's already cloned first.
+- Do not let leaderboard rate limits stall the session. Use the cooldown window for research, code changes, and benchmark-driven candidate selection.
+- Queue the best candidate for the next scarce leaderboard slot instead of submitting every passing variant.

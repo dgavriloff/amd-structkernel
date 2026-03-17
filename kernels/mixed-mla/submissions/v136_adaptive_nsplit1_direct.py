@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v138: Restore the last kept Triton baseline from v123 after the reverted v136 direct-output regression.
-- Same kernel logic as v123.
-- Re-establishes the cached NSPLIT + MXFP4-K/FP8-V path that previously scored 18.09 us.
-- Used as the recovery baseline before further tuning.
+v136: Adaptive NSPLIT with direct-output fast path for the smallest shape.
+- NSPLIT=1 for bs<=4,kv<=1024: stage1 writes directly to output, skipping stage2.
+- NSPLIT=4 for other kv=1024 shapes to cut split/reduce overhead versus v123.
+- NSPLIT=8 for kv<=2048, NSPLIT=16 otherwise.
+- Based on the v123 Triton MXFP4 K + FP8 V kernel family.
 """
 
 import torch
@@ -21,7 +22,6 @@ PKD_PAD = 512
 NSC_PAD = 32
 
 _buf_cache = {}
-_nsplit_cache = {}
 
 
 @triton.jit
@@ -40,6 +40,7 @@ def _stage1(
     QK_P: tl.constexpr,
     PKD_P: tl.constexpr,
     NSC_P: tl.constexpr,
+    DIRECT_OUTPUT: tl.constexpr,
 ):
     pid = tl.program_id(0)
     hid = pid % NHEADS
@@ -56,26 +57,30 @@ def _stage1(
     ss = sid * per_split
     se = tl.minimum(ss + per_split, kv_len)
 
-    lse_off = (qi * NSPLIT + sid) * NHEADS + hid
-    v_off = lse_off * V_DIM
+    ov = tl.arange(0, V_DIM)
+
+    if not DIRECT_OUTPUT:
+        lse_off = (qi * NSPLIT + sid) * NHEADS + hid
+        v_off = lse_off * V_DIM
 
     if ss >= kv_len:
-        tl.store(Mid_lse + lse_off, float("-inf"))
-        ov = tl.arange(0, V_DIM)
-        tl.store(Mid_v + v_off + ov, tl.zeros([V_DIM], dtype=tl.bfloat16))
+        if not DIRECT_OUTPUT:
+            tl.store(Mid_lse + lse_off, float("-inf"))
+            tl.store(Mid_v + v_off + ov, tl.zeros([V_DIM], dtype=tl.bfloat16))
         return
 
-    # Load fp8 scale from device memory (avoids .item() CPU sync)
     fp8_scale = tl.load(FP8_SCALE_PTR).to(tl.float32)
 
     ok = tl.arange(0, QK_P)
-    q_vec = tl.load(Q + qi * NHEADS * QK_DIM + hid * QK_DIM + ok,
-                     mask=ok < QK_DIM, other=0.0)
+    q_vec = tl.load(
+        Q + qi * NHEADS * QK_DIM + hid * QK_DIM + ok,
+        mask=ok < QK_DIM,
+        other=0.0,
+    )
 
     m_i = float("-inf")
     l_i = 0.0
     acc_v = tl.zeros([V_DIM], dtype=tl.float32)
-    ov = tl.arange(0, V_DIM)
 
     for blk_s in range(ss, se, BN):
         bn = tl.minimum(BN, se - blk_s)
@@ -84,15 +89,23 @@ def _stage1(
         kg = kv_s + blk_s + on
 
         opk = tl.arange(0, PKD_P)
-        kp = tl.load(KV_pk + kg[:, None] * PKD + opk[None, :],
-                      mask=nm[:, None] & (opk[None, :] < PKD), other=0)
+        kp = tl.load(
+            KV_pk + kg[:, None] * PKD + opk[None, :],
+            mask=nm[:, None] & (opk[None, :] < PKD),
+            other=0,
+        )
         osc = tl.arange(0, NSC_P)
-        ks = tl.load(KV_sc + kg[:, None] * N_SC + osc[None, :],
-                      mask=nm[:, None] & (osc[None, :] < N_SC), other=127)
+        ks = tl.load(
+            KV_sc + kg[:, None] * N_SC + osc[None, :],
+            mask=nm[:, None] & (osc[None, :] < N_SC),
+            other=127,
+        )
 
         kpt = tl.trans(kp)
-        scores_2d = tl.dot_scaled(q_vec[None, :].to(tl.bfloat16), None, "bf16",
-                                   kpt, ks, "e2m1")
+        scores_2d = tl.dot_scaled(
+            q_vec[None, :].to(tl.bfloat16), None, "bf16",
+            kpt, ks, "e2m1",
+        )
         scores = tl.reshape(scores_2d, [BN])
         scores = scores * 0.041666666666666664
         scores = tl.where(nm, scores, float("-inf"))
@@ -105,16 +118,20 @@ def _stage1(
         acc_v = acc_v * alpha
 
         fp8_offsets = (kg[:, None] * FP8_STRIDE + ov[None, :]).to(tl.int64)
-        vfp8 = tl.load(KV_fp8 + fp8_offsets,
-                        mask=nm[:, None], other=0.0)
+        vfp8 = tl.load(KV_fp8 + fp8_offsets, mask=nm[:, None], other=0.0)
         v_f32 = vfp8.to(tl.float32) * fp8_scale
 
         acc_v += tl.sum(p[:, None] * v_f32, axis=0)
         m_i = m_new
 
     inv_l = 1.0 / l_i
-    tl.store(Mid_lse + lse_off, m_i + tl.log(l_i))
-    tl.store(Mid_v + v_off + ov, (acc_v * inv_l).to(tl.bfloat16))
+
+    if DIRECT_OUTPUT:
+        o_base = qi * NHEADS * V_DIM + hid * V_DIM
+        tl.store(Mid_v + o_base + ov, (acc_v * inv_l).to(tl.bfloat16))
+    else:
+        tl.store(Mid_lse + lse_off, m_i + tl.log(l_i))
+        tl.store(Mid_v + v_off + ov, (acc_v * inv_l).to(tl.bfloat16))
 
 
 @triton.jit
@@ -149,9 +166,20 @@ def _stage2(
     tl.store(O + o_base + ov, (acc * inv).to(tl.bfloat16))
 
 
+def _get_nsplit(bs, kv_seq_len):
+    if kv_seq_len <= 1024 and bs <= 4:
+        return 1
+    if kv_seq_len <= 1024:
+        return 4
+    if kv_seq_len <= 2048:
+        return 8
+    return 16
+
+
 def custom_kernel(data: input_t) -> output_t:
     q, kv_data, qo_indptr, kv_indptr, config = data
     bs = config["batch_size"]
+    kv_seq_len = config["kv_seq_len"]
     tq = q.shape[0]
 
     kv_pk_raw, kv_sc_raw = kv_data["mxfp4"]
@@ -164,50 +192,61 @@ def custom_kernel(data: input_t) -> output_t:
 
     kv_fp8_raw, kv_fp8_scale = kv_data["fp8"]
     kv_fp8 = kv_fp8_raw.view(torch.float8_e4m3fnuz).reshape(kv_fp8_raw.shape[0], -1)
-    # Pass scale tensor pointer to kernel (avoids .item() GPU-CPU sync)
     fp8_scale_tensor = kv_fp8_scale.view(-1)
 
     PKD = kv_pk.shape[-1]
     N_SC = kv_sc.shape[-1]
     FP8_STRIDE = kv_fp8.shape[-1]
 
-    # Cache NSPLIT decision — avoids kv_indptr .item() sync on repeated calls
-    shape_key = (tq, bs)
-    if shape_key in _nsplit_cache:
-        NSPLIT = _nsplit_cache[shape_key]
-    else:
-        max_kv = int(kv_indptr[-1].item() - kv_indptr[0].item()) // max(bs, 1)
-        NSPLIT = 8 if max_kv <= 2048 else 16
-        _nsplit_cache[shape_key] = NSPLIT
+    NSPLIT = _get_nsplit(bs, kv_seq_len)
 
-    # Cache intermediate buffers
     buf_key = (tq, NSPLIT)
     if buf_key not in _buf_cache:
-        n_mid_v = tq * NSPLIT * NUM_HEADS * V_HEAD_DIM
-        _buf_cache[buf_key] = (
-            torch.empty(n_mid_v, dtype=torch.bfloat16, device="cuda"),
-            torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda"),
-            torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda"),
-        )
+        if NSPLIT == 1:
+            o = torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
+            _buf_cache[buf_key] = (o, None, o)
+        else:
+            n_mid_v = tq * NSPLIT * NUM_HEADS * V_HEAD_DIM
+            _buf_cache[buf_key] = (
+                torch.empty(n_mid_v, dtype=torch.bfloat16, device="cuda"),
+                torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda"),
+                torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda"),
+            )
     mid_v, mid_lse, o = _buf_cache[buf_key]
 
-    _stage1[(bs * NSPLIT * NUM_HEADS,)](
-        q, kv_pk, kv_sc, kv_fp8,
-        kv_indptr, qo_indptr,
-        mid_v, mid_lse,
-        fp8_scale_tensor,
-        NSPLIT=NSPLIT, BN=64, NHEADS=NUM_HEADS,
-        QK_DIM=QK_HEAD_DIM, V_DIM=V_HEAD_DIM,
-        FP8_STRIDE=FP8_STRIDE,
-        PKD=PKD, N_SC=N_SC,
-        QK_P=QK_PAD, PKD_P=PKD_PAD, NSC_P=NSC_PAD,
-        num_warps=4, num_stages=2,
-    )
+    if NSPLIT == 1:
+        _stage1[(bs * NUM_HEADS,)](
+            q, kv_pk, kv_sc, kv_fp8,
+            kv_indptr, qo_indptr,
+            o.view(-1), fp8_scale_tensor,
+            fp8_scale_tensor,
+            NSPLIT=1, BN=64, NHEADS=NUM_HEADS,
+            QK_DIM=QK_HEAD_DIM, V_DIM=V_HEAD_DIM,
+            FP8_STRIDE=FP8_STRIDE,
+            PKD=PKD, N_SC=N_SC,
+            QK_P=QK_PAD, PKD_P=PKD_PAD, NSC_P=NSC_PAD,
+            DIRECT_OUTPUT=True,
+            num_warps=4, num_stages=2,
+        )
+    else:
+        _stage1[(bs * NSPLIT * NUM_HEADS,)](
+            q, kv_pk, kv_sc, kv_fp8,
+            kv_indptr, qo_indptr,
+            mid_v, mid_lse,
+            fp8_scale_tensor,
+            NSPLIT=NSPLIT, BN=64, NHEADS=NUM_HEADS,
+            QK_DIM=QK_HEAD_DIM, V_DIM=V_HEAD_DIM,
+            FP8_STRIDE=FP8_STRIDE,
+            PKD=PKD, N_SC=N_SC,
+            QK_P=QK_PAD, PKD_P=PKD_PAD, NSC_P=NSC_PAD,
+            DIRECT_OUTPUT=False,
+            num_warps=4, num_stages=2,
+        )
 
-    _stage2[(bs, NUM_HEADS)](
-        mid_v, mid_lse, o, qo_indptr,
-        NSPLIT=NSPLIT, NHEADS=NUM_HEADS, V_DIM=V_HEAD_DIM,
-        num_warps=4,
-    )
+        _stage2[(bs, NUM_HEADS)](
+            mid_v, mid_lse, o, qo_indptr,
+            NSPLIT=NSPLIT, NHEADS=NUM_HEADS, V_DIM=V_HEAD_DIM,
+            num_warps=4,
+        )
 
     return o

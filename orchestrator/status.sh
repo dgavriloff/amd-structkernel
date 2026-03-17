@@ -5,11 +5,31 @@
 set -euo pipefail
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
-echo "╔══════════════════════════════════════════════════════════════════════════════════════════════════════╗"
-echo "║                              Kernel Optimization Orchestrator Status                                 ║"
-echo "╠══════════════╦══════════╦═════════╦═══════════════╦═══════╦══════════════════════════╦══════════╦════════════╣"
-echo "║ Kernel       ║ Version  ║ Score   ║ Attempts      ║ Agent ║ Tmux                     ║ Worker   ║ Close      ║"
-echo "╠══════════════╬══════════╬═════════╬═══════════════╬═══════╬══════════════════════════╬══════════╬════════════╣"
+preview_tail() {
+    local tmux_session="$1"
+    tmux capture-pane -pJ -t "$tmux_session" -S -12 2>/dev/null | python3 - <<'PY'
+import sys
+
+lines = [line.rstrip() for line in sys.stdin.read().splitlines()]
+while lines and not lines[-1].strip():
+    lines.pop()
+
+if not lines:
+    print("—")
+else:
+    joined = " | ".join(line.strip() for line in lines if line.strip())
+    joined = " ".join(joined.split())
+    if len(joined) > 80:
+        joined = joined[:77] + "..."
+    print(joined if joined else "—")
+PY
+}
+
+echo "╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗"
+echo "║                                              Kernel Optimization Orchestrator Status                                                   ║"
+echo "╠══════════════╦══════════╦═════════╦═══════════════╦═══════╦══════════════════════════╦══════════╦════════════╦═══════════════════════════════════════════════════════════╣"
+echo "║ Kernel       ║ Version  ║ Score   ║ Attempts      ║ Agent ║ Tmux                     ║ Worker   ║ Close      ║ Pane Tail                                                 ║"
+echo "╠══════════════╬══════════╬═════════╬═══════════════╬═══════╬══════════════════════════╬══════════╬════════════╬═══════════════════════════════════════════════════════════╣"
 
 for kernel_dir in "$REPO_DIR"/kernels/*/; do
     kernel=$(basename "$kernel_dir")
@@ -81,9 +101,11 @@ PY
     IFS=$'\t' read -r agent tmux last_action close_result <<< "$subagent_info"
 
     worker="idle"
+    preview="—"
     if [ "$tmux" != "—" ]; then
         if tmux has-session -t "$tmux" 2>/dev/null; then
             worker="running"
+            preview=$(preview_tail "$tmux")
         elif [ "$last_action" = "close" ]; then
             worker="closed"
         elif [ "$last_action" = "return" ]; then
@@ -98,8 +120,8 @@ PY
         score_display="${score}µs"
     fi
 
-    printf "║ %-12s ║ v%-7s ║ %-7s ║ %-13s ║ %-5s ║ %-24s ║ %-8s ║ %-10s ║\n" \
-        "$kernel" "$version" "$score_display" "$attempts tried" "$agent" "$tmux" "$worker" "$close_result"
+    printf "║ %-12s ║ v%-7s ║ %-7s ║ %-13s ║ %-5s ║ %-24s ║ %-8s ║ %-10s ║ %-57s ║\n" \
+        "$kernel" "$version" "$score_display" "$attempts tried" "$agent" "$tmux" "$worker" "$close_result" "$preview"
 done
 
-echo "╚══════════════╩══════════╩═════════╩═══════════════╩═══════╩══════════════════════════╩══════════╩════════════╝"
+echo "╚══════════════╩══════════╩═════════╩═══════════════╩═══════╩══════════════════════════╩══════════╩════════════╩═══════════════════════════════════════════════════════════╝"
