@@ -2,9 +2,10 @@
 
 ## How to Run
 Launch one tmux-backed Codex subagent in each kernel directory in parallel.
+Register the current orchestrator tmux session with `./orchestrator/register-orchestrator-session.sh` before launching workers.
 Use `./orchestrator/launch-codex-subagent.sh --kernel <kernel>` for launches.
-After launch and verification, return to idle.
-Every 10 minutes, run `./orchestrator/status.sh`. If fewer than 3 worker tmux sessions are live, relaunch the missing kernel workers. Never stop. Never ask.
+After each status check, run `./orchestrator/nudge-status-timer.sh` before returning to idle.
+Every 10 minutes, check status. If fewer than 3 worker tmux sessions are live, relaunch the missing kernel workers. Never stop. Never ask.
 
 The launcher assigns each agent a session ID via `./orchestrator/next_id.sh`.
 
@@ -34,12 +35,13 @@ Launch and maintain one worker for each kernel under `./kernels/` that has an `A
 - `mxfp4-mm`
 
 ## Process Model
+The orchestrator runs inside tmux and registers its tmux session via `./orchestrator/register-orchestrator-session.sh`.
 Each launched subagent runs inside its own tmux session.
 Each kernel records subagent lifecycle in `state/subagents.jsonl`.
 Worker tmux session existence is the source of truth for whether a worker is live.
 Workers are expected to exit their own Codex session after they finish and run `./tools/close_branch.sh`.
-After launching the required workers and confirming they are running, the orchestrator should return to an idle waiting state at the shell prompt.
-It is correct for the orchestrator to do nothing between the 10-minute polling checks.
+After launching the required workers and confirming they are running, the orchestrator should run `./orchestrator/nudge-status-timer.sh` and return to an idle waiting state at the shell prompt.
+It is correct for the orchestrator to do nothing between the 10-minute nudges.
 
 ## Rules
 - Do not write or modify code as part of orchestration.
@@ -49,5 +51,5 @@ It is correct for the orchestrator to do nothing between the 10-minute polling c
 - Never stop on your own.
 - Use the tmux-backed launcher, not API-spawned subagents.
 - Keep exactly one live worker per kernel.
-- Use the 10-minute status check as the relaunch mechanism.
+- Use the 10-minute status check plus `./orchestrator/nudge-status-timer.sh` as the relaunch mechanism.
 - After relaunching a missing worker and confirming it is running, return to idle again.
