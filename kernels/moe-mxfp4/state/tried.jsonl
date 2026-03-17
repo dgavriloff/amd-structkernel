@@ -123,3 +123,4 @@
 {"v": 140, "what": "FlyDSL t16x256x256_atomic stage2 for d=2048 (standard tile_n=256, tile_k=256 with tile_m=16)", "keywords": ["atomic", "flydsl", "stage2", "tile-config"], "score": 136.33, "kept": false, "reason": "+0.4% vs best", "session": 8}
 {"v": 141, "what": "cktile_moe ksplit=2 for bs512/E257 instead of CK 2-stage + NT=True", "keywords": ["cktile", "ksplit", "tile-config"], "score": 138.39, "kept": false, "reason": "+2.0% vs best", "session": 8}
 {"v": 143, "what": "FlyDSL stage2 t16x128x128_atomic for bs=512/E=257/d=256 instead of CK stage2 + NT=True", "keywords": ["flydsl", "stage2", "e257", "tile-config"], "score": 133.81, "kept": true, "reason": "improved geomean", "session": 14}
+{"v": 144, "what": "4-WG stage1 (256x32x128x128_1x4) + FlyDSL stage2 for bs=512/E=257/d=256", "keywords": ["4-wg", "stage1", "e257", "tile-config"], "score": 133.26, "kept": true, "reason": "improved geomean", "session": 14}
