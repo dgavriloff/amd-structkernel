@@ -3,3 +3,4 @@
 {"action": "submit", "mode": "test", "v": 136, "result": "pass", "ts": "2026-03-17T20:45:13.852548+00:00Z"}
 {"action": "propose", "what": "Restore the last kept Triton baseline (v123) as the active submission after the reverted v136 regression", "why": "state/tried.jsonl shows v136 was already leaderboard-tested and catastrophically reverted, while v123 is the last kept custom kernel at 18.09us; restoring the known-good baseline is the correct recovery before further tuning", "keywords": ["restore", "v123", "regression-recovery"], "prior_matches": 0, "ts": "2026-03-17T21:19:28.481945+00:00Z"}
 {"action": "submit", "mode": "test", "v": 138, "result": "pass", "ts": "2026-03-17T21:24:37.124348+00:00Z"}
+{"action": "close", "what_failed": "Coordinator requested session reset after adapting workflow to new rate limits.", "reverts": 0, "keeps": 0, "ts": "2026-03-17T21:34:35.138542+00:00Z"}
