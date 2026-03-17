@@ -2,8 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v160: block_m=64 for bs=512/E=33 (d=512 and d=2048), was block_m=128.
-With ~15.5 tokens/expert, block_m=64 gives better CU distribution.
+v164: block_m=64 for bs=512/E=257/d=256 (was block_m=32).
+block_m=64 gave -3.2% for E=33/bs=512, try same for E=257.
 """
 import os
 import functools
@@ -123,7 +123,7 @@ _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
 # DSV3 tuned CSV uses 4-WG for token>=64/E=257. Block_m=32 matches CSV.
 _4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
-    "block_m": 32,
+    "block_m": 64,  # v164: was 32, try 64 like E=33 shapes
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M32,  # v144: 4-WG instead of 1-WG
     "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v143: FlyDSL stage2
