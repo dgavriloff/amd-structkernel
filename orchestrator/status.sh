@@ -7,22 +7,33 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 preview_tail() {
     local tmux_session="$1"
-    tmux capture-pane -pJ -t "$tmux_session" -S -12 2>/dev/null | python3 - <<'PY'
-import sys
+    local captured
+    captured=$(tmux capture-pane -pJ -t "$tmux_session" -S -60 2>/dev/null) || true
+    python3 -c '
+import sys, re
 
-lines = [line.rstrip() for line in sys.stdin.read().splitlines()]
-while lines and not lines[-1].strip():
+raw = sys.argv[1].splitlines()
+
+chrome_re = re.compile(
+    r"^›\s|^\s*(gpt-|claude|sonnet|opus|haiku)|^\s*~/|^Find and fix|^\d+% left|esc to interrupt|^• (Working|Waiting)",
+    re.IGNORECASE,
+)
+
+lines = [l.rstrip() for l in raw]
+while lines and (not lines[-1].strip() or chrome_re.search(lines[-1])):
     lines.pop()
 
+lines = lines[-6:]
+
 if not lines:
-    print("—")
+    print("\u2014")
 else:
     joined = " | ".join(line.strip() for line in lines if line.strip())
     joined = " ".join(joined.split())
     if len(joined) > 80:
         joined = joined[:77] + "..."
-    print(joined if joined else "—")
-PY
+    print(joined if joined else "\u2014")
+' "$captured"
 }
 
 echo "╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗"

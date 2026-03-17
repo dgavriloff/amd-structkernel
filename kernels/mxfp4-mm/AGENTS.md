@@ -15,6 +15,11 @@
 10. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
 11. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh --what-failed "summary of what was attempted"`, then `exit`
 
+## Scoring
+- The best score in `best.json` is a leaderboard geomean computed from **random inputs**, so it has variance run-to-run. Small differences (±1-3%) can be noise.
+- Benchmark mode uses fixed inputs and is more stable. Use benchmark deltas to judge whether a change is genuinely better — don't reject a candidate just because its BM score is slightly above the stored LB best.
+- Only promote to leaderboard when benchmark shows a clear, repeatable improvement.
+
 ## Rules
 - Never edit files in `state/`. The tools do that.
 - submit.sh rejects without a registered proposal.
