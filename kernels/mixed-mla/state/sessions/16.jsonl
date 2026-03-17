@@ -3,3 +3,4 @@
 {"action": "submit", "mode": "leaderboard", "v": 113, "score": 20.01, "best": 20.78, "kept": true, "ts": "2026-03-17T08:13:50.711340+00:00Z"}
 {"action": "propose", "what": "Hybrid MXFP4 K + FP8 V: use dot_scaled for Q*K^T with MXFP4, but load FP8 KV for V accumulation", "why": "V dequant from MXFP4 is expensive (branching fp4 decode per element). FP8 V is just load + multiply by scalar scale. 2x bandwidth vs MXFP4 but eliminates all dequant compute. Also avoids lo/hi split - direct 512-dim bf16 output.", "keywords": ["hybrid-fp8-v", "mxfp4-k", "fp8-dequant", "bandwidth-vs-compute"], "prior_matches": 0, "ts": "2026-03-17T08:17:13.439493+00:00Z"}
 {"action": "submit", "mode": "test", "v": 114, "result": "fail", "ts": "2026-03-17T08:19:38.534927+00:00Z"}
+{"action": "submit", "mode": "test", "v": 114, "result": "pass", "ts": "2026-03-17T08:28:53.752789+00:00Z"}

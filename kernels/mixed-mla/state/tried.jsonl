@@ -109,3 +109,4 @@
 {"v": 111, "what": "MXFP4 Triton kernel v2: per-head processing, optimized fp4 dequant", "keywords": ["mxfp4", "triton", "per-head", "dequant"], "score": 20.78, "kept": true, "reason": "improved geomean", "session": 12}
 {"v": 112, "what": "MXFP4 Triton v3: tl.dot for V accum, 4-head groups, tuned splits per shape", "keywords": ["mxfp4", "triton", "tl.dot", "v-accum"], "score": 194.62, "kept": false, "reason": "+836.6% vs best", "session": 12}
 {"v": 113, "what": "Adaptive NSPLIT + full V dequant in stage1 + single mid buffer", "keywords": ["adaptive-nsplit", "full-v-dequant", "bf16-mid", "stage2-bandwidth"], "score": 20.01, "kept": true, "reason": "improved geomean", "session": 16}
+{"v": 114, "what": "Hybrid MXFP4 K + FP8 V: use dot_scaled for Q*K^T with MXFP4, but load FP8 KV for V accumulation", "keywords": ["hybrid-fp8-v", "mxfp4-k", "fp8-dequant", "bandwidth-vs-compute"], "score": 19.19, "kept": true, "reason": "improved geomean", "session": 16}

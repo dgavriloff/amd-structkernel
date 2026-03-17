@@ -109,8 +109,9 @@ def _stage1(
 
         # V from FP8: load [BN, V_DIM] fp8, multiply by scalar scale
         ov = tl.arange(0, V_DIM)
-        vfp8 = tl.load(KV_fp8 + kg[:, None] * FP8_STRIDE + ov[None, :],
-                        mask=nm[:, None], other=0)
+        fp8_offsets = (kg[:, None] * FP8_STRIDE + ov[None, :]).to(tl.int64)
+        vfp8 = tl.load(KV_fp8 + fp8_offsets,
+                        mask=nm[:, None], other=0.0)
         v_f32 = vfp8.to(tl.float32) * fp8_scale
 
         # V accum: p[BN] @ V[BN, V_DIM] -> [V_DIM]
