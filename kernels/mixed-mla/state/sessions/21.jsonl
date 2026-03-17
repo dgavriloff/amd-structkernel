@@ -11,3 +11,5 @@
 {"action": "submit", "mode": "test", "v": 123, "result": "pass", "ts": "2026-03-17T11:55:37.393435+00:00Z"}
 {"action": "submit", "mode": "leaderboard", "v": 123, "score": 18.09, "best": 18.93, "kept": true, "ts": "2026-03-17T12:01:10.679352+00:00Z"}
 {"action": "propose", "what": "Cache all tensor preprocessing (view/reshape/shape lookups) by data_ptr to skip redundant Python ops when PyTorch reuses memory", "why": "With recheck=True, PyTorch may reuse GPU memory addresses for new tensors. Even if not, the dict lookup is O(1) and view/reshape are cheap fallbacks. This eliminates conditional branches and method calls on the hot path.", "keywords": ["tensor-cache", "data-ptr", "view-cache", "preprocess"], "prior_matches": 0, "ts": "2026-03-17T12:01:52.855025+00:00Z"}
+{"action": "submit", "mode": "test", "v": 124, "result": "pass", "ts": "2026-03-17T12:09:02.669112+00:00Z"}
+{"action": "submit", "mode": "leaderboard", "v": 124, "score": 18.08, "best": 18.09, "kept": false, "ts": "2026-03-17T12:15:00.254441+00:00Z"}

@@ -2,8 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v159: block_m=64 for bs=128/E=33/d=512 (was block_m=128).
-With ~3.9 tokens/expert, block_m=128 causes heavy padding. block_m=64 halves padding.
+v160: block_m=64 for bs=512/E=33 (d=512 and d=2048), was block_m=128.
+With ~15.5 tokens/expert, block_m=64 gives better CU distribution.
 """
 import os
 import functools
@@ -101,17 +101,17 @@ _FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
 _FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
 
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
-    "block_m": 128,
+    "block_m": 64,  # v160: was 128, try 64 for better CU distribution
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
     "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
     "run_1stage": False,
 }
 
-# === bs=512/E=33/d=512: block_m=128 + 4-WG M128 stage1 + FlyDSL stage2 ===
-# v138: tile_m=16 for d=512 (v137 BM: 126->112us)
+# === bs=512/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 ===
+# v160: block_m=64 (was 128) for better CU distribution
 _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
-    "block_m": 128,
+    "block_m": 64,  # v160: was 128, try 64
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
     "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=512
