@@ -2,9 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v150: 4-WG M128 stage1 + FlyDSL stage2 for bs=128/E=33/d=512.
-Same approach that improved bs=512/E=33 significantly in v138.
-Replace cktile_moe ksplit=2 block_m=64 with CK 2-stage 4-WG + FlyDSL.
+v154: moe_sorting_dispatch_policy=1 for all shapes.
+Alternative expert dispatch scheduling may improve wave utilization.
 """
 import os
 import functools
@@ -243,6 +242,7 @@ def custom_kernel(data: input_t) -> output_t:
         w2_scale=down_weight_scale_shuffled,
         a1_scale=None, a2_scale=None,
         hidden_pad=hidden_pad, intermediate_pad=intermediate_pad,
+        moe_sorting_dispatch_policy=1,
     )
 
     return output

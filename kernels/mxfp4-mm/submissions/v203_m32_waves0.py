@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v201: M=64 waves_per_eu=2 (from 1) with .cg cache modifier preserved.
+v203: M=32 K<=1024: waves_per_eu from 2 to 0 (compiler decides).
 
-v80 tested waves_per_eu=2 + cache_modifier=None together (confounded, neutral).
-waves_per_eu=2 alone with .cg has never been tested for M=64 specifically.
+v201 baseline: M=64 waves_per_eu=2 kept. Now testing M=32 K<=1024
+path with waves_per_eu=0 to let compiler optimize occupancy.
 """
 import torch
 import triton
@@ -90,7 +90,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 2,
+            "waves_per_eu": 0,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,

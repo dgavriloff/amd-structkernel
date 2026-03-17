@@ -131,3 +131,5 @@
 {"v": 150, "what": "4-WG stage1 + FlyDSL stage2 for bs=128/E=33/d=512 with block_m=128", "keywords": ["4-wg", "stage1", "e33", "bs128", "flydsl"], "score": 131.75, "kept": true, "reason": "improved geomean", "session": 18}
 {"v": 151, "what": "cktile_moe ksplit=4 for bs=128/E=257/d=256 (more K-parallelism)", "keywords": ["cktile", "ksplit4", "e257", "bs128"], "score": 132.6, "kept": false, "reason": "+0.6% vs best", "session": 18}
 {"v": 152, "what": "use_non_temporal_load=False for bs=512/E=33 shapes (d=512 and d=2048)", "keywords": ["non-temporal", "cache", "e33", "bs512"], "score": 132.78, "kept": false, "reason": "+0.8% vs best", "session": 18}
+{"v": 153, "what": "cktile_moe block_m=32 ksplit=2 for bs=128/E=257/d=256 (larger block_m)", "keywords": ["cktile", "block_m32", "ksplit2", "e257"], "score": 131.89, "kept": false, "reason": "+0.1% vs best", "session": 18}
+{"v": 154, "what": "moe_sorting_dispatch_policy=1 for all shapes (alternative expert dispatch scheduling)", "keywords": ["dispatch-policy", "sorting", "scheduling"], "score": 165.66, "kept": false, "reason": "+25.7% vs best", "session": 18}
