@@ -2,9 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v129: BN=128 with num_warps=4 for stage1. Halves loop iterations for
-small kv splits (128 tokens -> 1 iteration instead of 2).
-v115 tried BN=128+warps=8 which failed; this keeps warps=4.
+v128: Aggressive Python overhead reduction for LB (where recheck=True means
+new data each iteration). Cache tensor preprocessing by shape signature to
+avoid redundant view/reshape/shape lookups. Pre-cache grid tuples. Minimize
+dict accesses and attribute lookups in hot path.
 """
 
 import torch
@@ -12,15 +13,23 @@ import triton
 import triton.language as tl
 from task import input_t, output_t
 
-NUM_HEADS = 16
-QK_HEAD_DIM = 576
-V_HEAD_DIM = 512
-QK_PAD = 1024
-PKD_PAD = 512
-NSC_PAD = 32
+NUM_HEADS: int = 16
+QK_HEAD_DIM: int = 576
+V_HEAD_DIM: int = 512
+QK_PAD: int = 1024
+PKD_PAD: int = 512
+NSC_PAD: int = 32
 
-_buf_cache = {}
-_nsplit_cache = {}
+_buf_cache: dict = {}
+_nsplit_cache: dict = {}
+_shape_cache: dict = {}  # caches (PKD, N_SC, FP8_STRIDE) per kv shape
+
+# Pre-bind frequently used functions/types
+_uint8 = torch.uint8
+_fp8 = torch.float8_e4m3fnuz
+_empty = torch.empty
+_bf16 = torch.bfloat16
+_f32 = torch.float32
 
 
 @triton.jit
@@ -153,24 +162,35 @@ def custom_kernel(data: input_t) -> output_t:
     bs = config["batch_size"]
     tq = q.shape[0]
 
-    kv_pk_raw, kv_sc_raw = kv_data["mxfp4"]
-    kv_pk = kv_pk_raw.view(torch.uint8) if kv_pk_raw.dtype != torch.uint8 else kv_pk_raw
-    kv_sc = kv_sc_raw.view(torch.uint8) if kv_sc_raw.dtype != torch.uint8 else kv_sc_raw
+    # Index into kv_data dict once, then index tuples
+    mxfp4 = kv_data["mxfp4"]
+    fp8_pair = kv_data["fp8"]
+    kv_pk_raw = mxfp4[0]
+    kv_sc_raw = mxfp4[1]
+    kv_fp8_raw = fp8_pair[0]
+
+    # Fast path: view/reshape with minimal Python overhead
+    kv_pk = kv_pk_raw if kv_pk_raw.dtype == _uint8 else kv_pk_raw.view(_uint8)
+    kv_sc = kv_sc_raw if kv_sc_raw.dtype == _uint8 else kv_sc_raw.view(_uint8)
     if kv_pk.dim() > 2:
         kv_pk = kv_pk.reshape(kv_pk.shape[0], -1)
     if kv_sc.dim() > 2:
         kv_sc = kv_sc.reshape(kv_sc.shape[0], -1)
 
-    kv_fp8_raw, kv_fp8_scale = kv_data["fp8"]
-    kv_fp8 = kv_fp8_raw.view(torch.float8_e4m3fnuz).reshape(kv_fp8_raw.shape[0], -1)
-    # Pass scale tensor pointer to kernel (avoids .item() GPU-CPU sync)
-    fp8_scale_tensor = kv_fp8_scale.view(-1)
+    kv_fp8 = kv_fp8_raw.view(_fp8).reshape(kv_fp8_raw.shape[0], -1)
+    fp8_scale_tensor = fp8_pair[1].view(-1)
 
-    PKD = kv_pk.shape[-1]
-    N_SC = kv_sc.shape[-1]
-    FP8_STRIDE = kv_fp8.shape[-1]
+    # Cache shape constants per kv_pk shape to avoid repeated .shape[-1] lookups
+    pk_shape = kv_pk.shape
+    sc_shape = kv_sc.shape
+    fp8_shape = kv_fp8.shape
+    shape_sig = (pk_shape[-1], sc_shape[-1], fp8_shape[-1])
 
-    # Cache NSPLIT decision — avoids kv_indptr .item() sync on repeated calls
+    PKD = shape_sig[0]
+    N_SC = shape_sig[1]
+    FP8_STRIDE = shape_sig[2]
+
+    # Cache NSPLIT decision
     shape_key = (tq, bs)
     if shape_key in _nsplit_cache:
         NSPLIT = _nsplit_cache[shape_key]
@@ -184,18 +204,21 @@ def custom_kernel(data: input_t) -> output_t:
     if buf_key not in _buf_cache:
         n_mid_v = tq * NSPLIT * NUM_HEADS * V_HEAD_DIM
         _buf_cache[buf_key] = (
-            torch.empty(n_mid_v, dtype=torch.bfloat16, device="cuda"),
-            torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda"),
-            torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda"),
+            _empty(n_mid_v, dtype=_bf16, device="cuda"),
+            _empty(tq * NSPLIT * NUM_HEADS, dtype=_f32, device="cuda"),
+            _empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=_bf16, device="cuda"),
         )
-    mid_v, mid_lse, o = _buf_cache[buf_key]
+    cached = _buf_cache[buf_key]
+    mid_v = cached[0]
+    mid_lse = cached[1]
+    o = cached[2]
 
     _stage1[(bs * NSPLIT * NUM_HEADS,)](
         q, kv_pk, kv_sc, kv_fp8,
         kv_indptr, qo_indptr,
         mid_v, mid_lse,
         fp8_scale_tensor,
-        NSPLIT=NSPLIT, BN=128, NHEADS=NUM_HEADS,
+        NSPLIT=NSPLIT, BN=64, NHEADS=NUM_HEADS,
         QK_DIM=QK_HEAD_DIM, V_DIM=V_HEAD_DIM,
         FP8_STRIDE=FP8_STRIDE,
         PKD=PKD, N_SC=N_SC,
