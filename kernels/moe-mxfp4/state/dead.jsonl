@@ -13,3 +13,4 @@
 {"technique": "hybrid a4w4 stage1 + a16w4 stage2", "reason": "cktile_moe_stage2 with bf16 activations +41% worse", "count": 1}
 {"technique": "block_m=32 for bs=512 shapes", "reason": "correctness failures or regression; block_m=32 only works with cktile_moe ksplit", "count": 3}
 {"technique": "tile_k>128 for d=512 FlyDSL stage2", "reason": "tile_k=256 same or slightly worse than tile_k=128 for d=512 on both BM and secret LB", "count": 1, "sessions": [8]}
+{"technique": "FlyDSL stage1 fp4 compilation", "reason": "server aiter has bug: compute_f8f6f4_tile() got unexpected keyword argument b_scale in mixed_moe_gemm_2stage.py", "count": 1, "sessions": [14]}

@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v144: 4-WG stage1 (256x32x128x128_1x4) + FlyDSL stage2 for bs=512/E=257.
-DSV3 tuned CSV uses 4-WG for token>=64 E=257. Try 4-WG with block_m=32
-combined with FlyDSL stage2 from v143 for this shape.
+v147: Revert d=2048 stage2 from t16x128x128 to t32x128x256 (default).
+tile_k=256 with K=2048 gives 8 tiles vs 16 with tile_k=128.
+tile_m=32 may also give better wave utilization for d=2048.
 """
 import os
 import functools
@@ -104,7 +104,7 @@ _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 128,
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
+    "kernelName2": _FLYDSL_STAGE2,  # v147: revert to t32x128x256 for d=2048
     "run_1stage": False,
 }
 
