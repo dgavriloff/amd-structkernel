@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v192: Use AMD library-tuned config for split-K shape (16x2112x7168):
-BSK=512/NS=1/split-K=14/waves_per_eu=1 from gfx950-GEMM-A16WFP4_PRESHUFFLED-N=2112-K=7168.json.
-Previously used BSK=256/NS=2/split-K=7. Library config: 1 K-iter per split with
-larger K-tile, no double-buffering overhead, 476 blocks (1.86 waves) vs 238 (0.93).
+v191: Update M<=32 K>1024 fused config from legacy BSM=32/BSN=64/BSK=512/NW=8/NS=1
+to BSM=8/BSN=128/BSK=256/NW=4/NS=2/.cg.
+
+v189 tried this but LB returned 'could not parse score'. Re-testing.
+Doubles grid from 112 to 224 blocks (0.44->0.875 waves), enables NS=2 pipelining.
 """
 import torch
 import triton
@@ -41,20 +42,20 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # AMD library-tuned config for N=2112, K=7168 (gfx950 preshuffle JSON)
-        # BSK=512/NS=1/split-K=14: 1 K-iter per split, no double-buffering overhead
-        # 476 blocks (1.86 waves) vs previous 238 blocks (0.93 waves)
+        # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
+        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
+        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 512,
+            "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
-            "num_stages": 1,
-            "waves_per_eu": 1,
+            "num_stages": 2,
+            "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
-            "NUM_KSPLIT": 14,
+            "NUM_KSPLIT": 7,
         }
     if M <= 4:
         return {
@@ -96,16 +97,20 @@ def _get_fused_config(M, N, K):
             "NUM_KSPLIT": 1,
         }
     elif M <= 32:
+        # Updated from legacy BSM=32/BSN=64/BSK=512/NW=8/NS=1 (v21 era)
+        # to match proven BSM=8/BSN=128/BSK=256/NW=4/NS=2 config.
+        # For 32x7168x2048: 224 blocks (0.875 waves) vs 112 (0.44 waves),
+        # 8 K-iters with pipelining vs 4 without.
         return {
-            "BLOCK_SIZE_M": 32,
-            "BLOCK_SIZE_N": 64,
-            "BLOCK_SIZE_K": 512,
+            "BLOCK_SIZE_M": 8,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
-            "num_warps": 8,
-            "num_stages": 1,
+            "num_warps": 4,
+            "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": None,
+            "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
         }
     else:

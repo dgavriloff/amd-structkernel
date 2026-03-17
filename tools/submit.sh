@@ -68,6 +68,26 @@ elif [ "$MODE" = "leaderboard" ]; then
         SCORE=$(echo "$RESULT" | grep -i "geomean" | grep -oE '[0-9]+\.[0-9]+' | tail -1 || echo "")
     fi
 
+    # Fallback: compute geomean from Ranked Benchmark ⏱ lines
+    if [ -z "$SCORE" ]; then
+        SCORE=$(echo "$RESULT" | python3 -c "
+import sys, re, math
+text = sys.stdin.read()
+# Find the Ranked Benchmark section
+idx = text.find('Ranked Benchmark')
+if idx == -1:
+    sys.exit(1)
+ranked_section = text[idx:]
+# Extract ⏱ times (mean values)
+times = re.findall(r'⏱\s+([0-9]+\.[0-9]+)\s+±', ranked_section)
+if not times:
+    sys.exit(1)
+times = [float(t) for t in times]
+geomean = math.exp(sum(math.log(t) for t in times) / len(times))
+print(f'{geomean:.2f}')
+" 2>/dev/null || echo "")
+    fi
+
     if [ -z "$SCORE" ]; then
         echo "WARNING: Could not extract score from output."
         echo "REVERT — could not parse score."
