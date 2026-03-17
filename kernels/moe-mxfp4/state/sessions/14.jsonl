@@ -3,3 +3,4 @@
 {"action": "submit", "mode": "leaderboard", "v": 142, "score": null, "best": null, "kept": false, "reason": "could not parse score", "ts": "2026-03-17T07:46:01.441706+00:00Z"}
 {"action": "propose", "what": "FlyDSL stage2 t16x128x128_atomic for bs=512/E=257/d=256 instead of CK stage2 + NT=True", "why": "bs=512/E=257 uses CK stage2 with NT=True. FlyDSL stage2 with tile_m=16 has worked well for E=33 shapes. d_hidden=7168 is the N dimension for stage2 (down proj). Try FlyDSL atomic stage2 which may have better wave scheduling for the 257-expert shape.", "keywords": ["flydsl", "stage2", "e257", "tile-config"], "prior_matches": 0, "ts": "2026-03-17T07:46:30.547212+00:00Z"}
 {"action": "submit", "mode": "test", "v": 143, "result": "pass", "ts": "2026-03-17T07:50:30.609637+00:00Z"}
+{"action": "submit", "mode": "leaderboard", "v": 143, "score": 133.81, "best": 135.73, "kept": true, "ts": "2026-03-17T07:57:36.702067+00:00Z"}

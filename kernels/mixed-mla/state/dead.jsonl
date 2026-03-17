@@ -10,3 +10,4 @@
 {"technique": "a8w8 (fp8 Q + fp8 KV)", "reason": "GPU-only Q quantization has massive overhead (+285%)", "count": 2}
 {"technique": "bf16 persistent for kv=1024", "reason": "tolerance failures at page_size=16/32, regression at page_size=8", "count": 4}
 {"technique": "bf16_persist page_size=128 for kv>=4096", "reason": "Tolerance failure at all batch sizes including bs>=64 (v106). Sub-page kv_granularity=32 for bf16_persist is noise-neutral (v109).", "count": 1, "sessions": [7]}
+{"technique": "all-heads-per-program MXFP4 Triton", "reason": "Register pressure from [16,256] accumulators and masked row extraction tl.sum(acc*mask) makes all-heads ~10x slower than per-head", "count": 1, "sessions": [12]}
