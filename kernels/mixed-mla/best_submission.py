@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v121: Load fp8_scale inside kernel from tensor pointer to avoid .item() GPU-CPU sync.
-- Pass fp8_scale as tensor pointer, load scalar inside kernel.
+v123: Cache NSPLIT decision by (tq, bs) to avoid kv_indptr .item() GPU-CPU sync on repeats.
+- First call per (tq, bs) shape: compute NSPLIT from kv_indptr (sync).
+- Subsequent calls: use cached NSPLIT (no sync).
+- Keep fp8_scale tensor pointer from v121.
 - Keep buffer caching from v120.
-- Keep MXFP4 K + FP8 V, adaptive NSPLIT (8/16), BN=64.
 """
 
 import torch
@@ -21,6 +22,7 @@ PKD_PAD = 512
 NSC_PAD = 32
 
 _buf_cache = {}
+_nsplit_cache = {}
 
 
 @triton.jit
@@ -170,8 +172,14 @@ def custom_kernel(data: input_t) -> output_t:
     N_SC = kv_sc.shape[-1]
     FP8_STRIDE = kv_fp8.shape[-1]
 
-    max_kv = int(kv_indptr[-1].item() - kv_indptr[0].item()) // max(bs, 1)
-    NSPLIT = 8 if max_kv <= 2048 else 16
+    # Cache NSPLIT decision — avoids kv_indptr .item() sync on repeated calls
+    shape_key = (tq, bs)
+    if shape_key in _nsplit_cache:
+        NSPLIT = _nsplit_cache[shape_key]
+    else:
+        max_kv = int(kv_indptr[-1].item() - kv_indptr[0].item()) // max(bs, 1)
+        NSPLIT = 8 if max_kv <= 2048 else 16
+        _nsplit_cache[shape_key] = NSPLIT
 
     # Cache intermediate buffers
     buf_key = (tq, NSPLIT)
