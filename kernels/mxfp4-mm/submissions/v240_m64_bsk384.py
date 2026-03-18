@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v241: M<=32 K<=1024 cache_modifier=None (from .cg).
+v240: M=64 fused path uses BLOCK_SIZE_K=384 (from 256).
 
-For K=512 BSM=8 BSN=128 BSK=256, B data per block is 32KB FP4.
-Without .cg, L1 caching improves latency for 2 K-iterations.
-AMD library default uses null for this config.
+This gives the 64x7168x2048 shape 6 K-iterations instead of 8.
+It keeps the proven 16x128 tile family and double-buffered pipeline
+while reducing loop/control overhead versus BSK=256.
 """
 import torch
 import triton
@@ -111,12 +111,12 @@ def _get_fused_config(M, N, K):
         }
     else:
         # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
-        # 4*56=224 blocks, 8 K-iters with pipelining
+        # Test BSK=384 midpoint: 224 blocks, 6 K-iters with pipelining
         # waves_per_eu=2: hint for higher occupancy per EU
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 256,
+            "BLOCK_SIZE_K": 384,
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,

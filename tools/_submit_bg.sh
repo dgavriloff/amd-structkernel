@@ -24,7 +24,12 @@ MESSAGE=$(echo "$RESULT" | python3 "$REPO_DIR/tools/_process_result.py" \
     "$MODE" "$VERSION" "$SESSION_FILE" "$STATE_DIR/best.json" \
     "$STATE_DIR/tried.jsonl" "$KERNEL_DIR" "$SESSION_ID" "$SNAPSHOT" 2>/dev/null) || true
 
-# Deliver to agent — extra Enter ensures Codex processes queued input
+# Deliver to agent
 if [ -n "$MESSAGE" ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    # If revert limit reached, interrupt current turn first so the agent processes it immediately
+    if echo "$MESSAGE" | grep -q "REVERT LIMIT REACHED"; then
+        tmux send-keys -t "$TMUX_SESSION" Escape
+        sleep 2
+    fi
     tmux send-keys -t "$TMUX_SESSION" "$MESSAGE" Enter Enter
 fi

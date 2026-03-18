@@ -2,11 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v241: M<=32 K<=1024 cache_modifier=None (from .cg).
+v237: Split-K path uses BLOCK_SIZE_K=512, NUM_KSPLIT=2, BLOCK_SIZE_N=64, num_stages=2, GROUP_SIZE_M=2, num_warps=8, and waves_per_eu=1.
 
-For K=512 BSM=8 BSN=128 BSK=256, B data per block is 32KB FP4.
-Without .cg, L1 caching improves latency for 2 K-iterations.
-AMD library default uses null for this config.
+This keeps the strongest BSN64 two-way split-K geometry so far while relaxing
+the occupancy hint to reduce register pressure on the large-K branch.
 """
 import torch
 import triton
@@ -42,20 +41,19 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
-        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
-        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
+        # Split-K=2 with BSK=512 and BSN=64 for large-K shapes (e.g., 16x2112x7168)
+        # This doubles the GEMM grid from 68 to 132 blocks versus BSN=128.
         return {
             "BLOCK_SIZE_M": 8,
-            "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 256,
-            "GROUP_SIZE_M": 1,
-            "num_warps": 4,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_K": 512,
+            "GROUP_SIZE_M": 2,
+            "num_warps": 8,
             "num_stages": 2,
-            "waves_per_eu": 2,
+            "waves_per_eu": 1,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
-            "NUM_KSPLIT": 7,
+            "NUM_KSPLIT": 2,
         }
     if M <= 4:
         return {
