@@ -48,7 +48,9 @@ is_agent_idle() {
 
 count_bg_jobs() {
     local kernel="$1"
-    tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c "^bg-${kernel}-" || echo "0"
+    local n
+    n=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c "^bg-${kernel}-" 2>/dev/null) || n=0
+    echo "$n"
 }
 
 list_bg_jobs() {
