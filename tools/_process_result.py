@@ -79,7 +79,7 @@ def main():
         else:
             score = geomean_from_text(result)
             if score:
-                print(f'[SUBMIT RESULT] v{version} benchmark geomean={score:.2f}µs')
+                print(f'[SUBMIT RESULT] v{version} benchmark geomean={score:.2f}µs (BM only — not comparable to LB scores. Only compare BM to BM.)')
             else:
                 print(f'[SUBMIT RESULT] v{version} benchmark completed (could not parse geomean)')
 
