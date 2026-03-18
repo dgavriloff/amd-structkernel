@@ -25,11 +25,11 @@ MESSAGE=$(echo "$RESULT" | python3 "$REPO_DIR/tools/_process_result.py" \
     "$MODE" "$VERSION" "$SESSION_FILE" "$STATE_DIR/best.json" \
     "$STATE_DIR/tried.jsonl" "$KERNEL_DIR" "$SESSION_ID" "$SNAPSHOT" 2>/dev/null) || true
 
-# Deliver to agent
-if [ -n "$MESSAGE" ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    tmux send-keys -t "$TMUX_SESSION" "$MESSAGE" C-m
+# Deliver to agent — unset TMUX so send-keys works from inside a tmux session
+if [ -n "$MESSAGE" ] && TMUX= tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    TMUX= tmux send-keys -t "$TMUX_SESSION" "$MESSAGE" C-m
     sleep 1
-    tmux send-keys -t "$TMUX_SESSION" C-m
+    TMUX= tmux send-keys -t "$TMUX_SESSION" C-m
 fi
 
 # If revert limit reached, run close_branch.sh ourselves and kill the agent
