@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v179: Start from v176 and add bs=16/E=257 cktile block_m=32.
-This keeps the best benchmarked bs128 NT=True plus bs512 t16x256x128 sparse bundle
-and tests whether the tiny sparse bs16 shape contributes positively on top.
+v173: Keep only the bs=512/E=257 t16x256x128 stage2 widening and disable
+non-temporal loads for that shape's CK stage1. Revert the bs=16/E=257
+block_m=32 tweak so this isolates the NT setting around the near-tie v165 path.
 """
 import os
 import functools
@@ -72,7 +72,7 @@ _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
 # With 144 token-expert pairs across 257 experts, most experts get 0-1 tokens.
 # Skipping activation quantization + using split-K may help.
 _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
-    "block_m": 32,
+    "block_m": 16,
     "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",
@@ -81,12 +81,11 @@ _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
 
 # bs=128/E=257/d=256: revert to baseline ksplit=2 cktile_moe path.
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
-    "block_m": 32,
+    "block_m": 16,
     "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",
     "run_1stage": False,
-    "use_non_temporal_load": True,
 }
 
 # === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===
@@ -129,7 +128,7 @@ _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "kernelName1": _4WG_STAGE1_M32,  # v144: 4-WG instead of 1-WG
     "kernelName2": _FLYDSL_STAGE2_M16_N256_K128,  # v165: widen tile_n to 256 only here
     "run_1stage": False,
-    "use_non_temporal_load": True,
+    "use_non_temporal_load": False,
 }
 
 _injected = False

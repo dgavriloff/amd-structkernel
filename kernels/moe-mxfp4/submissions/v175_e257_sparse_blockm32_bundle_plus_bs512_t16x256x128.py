@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v179: Start from v176 and add bs=16/E=257 cktile block_m=32.
-This keeps the best benchmarked bs128 NT=True plus bs512 t16x256x128 sparse bundle
-and tests whether the tiny sparse bs16 shape contributes positively on top.
+v175: Extend the sparse E=257 bundle by pairing bs=16 and bs=128 cktile
+block_m=32 settings with the near-tie bs=512/E=257 t16x256x128 stage2 widening.
+Keep the bs128 path on cktile rather than FlyDSL and leave bs512 NT=True.
 """
 import os
 import functools
@@ -86,7 +86,6 @@ _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
     "kernelName1": "",
     "kernelName2": "",
     "run_1stage": False,
-    "use_non_temporal_load": True,
 }
 
 # === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===

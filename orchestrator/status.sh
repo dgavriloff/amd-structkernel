@@ -36,11 +36,29 @@ else:
 ' "$captured"
 }
 
-echo "╔═══════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╗"
-echo "║                                              Kernel Optimization Orchestrator Status                                                   ║"
-echo "╠══════════════╦══════════╦═════════╦═══════════════╦═══════╦══════════════════════════╦══════════╦════════════╦═══════════════════════════════════════════════════════════╣"
-echo "║ Kernel       ║ Version  ║ Score   ║ Attempts      ║ Agent ║ Tmux                     ║ Worker   ║ Close      ║ Pane Tail                                                 ║"
-echo "╠══════════════╬══════════╬═════════╬═══════════════╬═══════╬══════════════════════════╬══════════╬════════════╬═══════════════════════════════════════════════════════════╣"
+is_agent_idle() {
+    local tmux_session="$1"
+    local pane
+    pane=$(tmux capture-pane -pJ -t "$tmux_session" -S -5 2>/dev/null) || return 1
+    if echo "$pane" | grep -qE '^\s*›' && ! echo "$pane" | grep -qE 'Working|Waiting'; then
+        return 0
+    fi
+    return 1
+}
+
+count_bg_jobs() {
+    local kernel="$1"
+    tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -c "^bg-${kernel}-" || echo "0"
+}
+
+list_bg_jobs() {
+    local kernel="$1"
+    tmux list-sessions -F '#{session_name}' 2>/dev/null | grep "^bg-${kernel}-" | sed "s/^bg-${kernel}-//" | tr '\n' ' ' || true
+}
+
+echo "╔══════════════╦══════════╦═════════╦═══════════════╦═══════╦══════════════════════════╦══════════╦════════╦═══════════════════════════════════════════════════════════════════╗"
+echo "║ Kernel       ║ Version  ║ Score   ║ Attempts      ║ Agent ║ Tmux                     ║ Worker   ║ Queue  ║ Pane Tail                                                         ║"
+echo "╠══════════════╬══════════╬═════════╬═══════════════╬═══════╬══════════════════════════╬══════════╬════════╬═══════════════════════════════════════════════════════════════════╣"
 
 for kernel_dir in "$REPO_DIR"/kernels/*/; do
     kernel=$(basename "$kernel_dir")
@@ -113,6 +131,7 @@ PY
 
     worker="idle"
     preview="—"
+    bg_count=$(count_bg_jobs "$kernel")
     if [ "$tmux" != "—" ]; then
         if tmux has-session -t "$tmux" 2>/dev/null; then
             worker="running"
@@ -131,8 +150,10 @@ PY
         score_display="${score}µs"
     fi
 
-    printf "║ %-12s ║ v%-7s ║ %-7s ║ %-13s ║ %-5s ║ %-24s ║ %-8s ║ %-10s ║ %-57s ║\n" \
-        "$kernel" "$version" "$score_display" "$attempts tried" "$agent" "$tmux" "$worker" "$close_result" "$preview"
+    queue_display="${bg_count} jobs"
+
+    printf "║ %-12s ║ v%-7s ║ %-7s ║ %-13s ║ %-5s ║ %-24s ║ %-8s ║ %-6s ║ %-65s ║\n" \
+        "$kernel" "$version" "$score_display" "$attempts tried" "$agent" "$tmux" "$worker" "$queue_display" "$preview"
 done
 
-echo "╚══════════════╩══════════╩═════════╩═══════════════╩═══════╩══════════════════════════╩══════════╩════════════╩═══════════════════════════════════════════════════════════╝"
+echo "╚══════════════╩══════════╩═════════╩═══════════════╩═══════╩══════════════════════════╩══════════╩════════╩═══════════════════════════════════════════════════════════════════╝"

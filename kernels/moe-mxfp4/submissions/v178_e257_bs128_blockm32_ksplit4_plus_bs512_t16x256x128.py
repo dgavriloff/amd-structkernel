@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v179: Start from v176 and add bs=16/E=257 cktile block_m=32.
-This keeps the best benchmarked bs128 NT=True plus bs512 t16x256x128 sparse bundle
-and tests whether the tiny sparse bs16 shape contributes positively on top.
+v178: Start from v174 and change bs=128/E=257 cktile from ksplit=2 to
+ksplit=4 while keeping block_m=32 and the bs=512/E=257 t16x256x128 widening.
+This isolates whether extra K-parallelism improves the stronger sparse-shape bundle.
 """
 import os
 import functools
@@ -72,7 +72,7 @@ _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
 # With 144 token-expert pairs across 257 experts, most experts get 0-1 tokens.
 # Skipping activation quantization + using split-K may help.
 _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
-    "block_m": 32,
+    "block_m": 16,
     "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",
@@ -82,11 +82,10 @@ _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
 # bs=128/E=257/d=256: revert to baseline ksplit=2 cktile_moe path.
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
     "block_m": 32,
-    "ksplit": 2,
+    "ksplit": 4,
     "kernelName1": "",
     "kernelName2": "",
     "run_1stage": False,
-    "use_non_temporal_load": True,
 }
 
 # === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===

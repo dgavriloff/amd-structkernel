@@ -2,9 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v179: Start from v176 and add bs=16/E=257 cktile block_m=32.
-This keeps the best benchmarked bs128 NT=True plus bs512 t16x256x128 sparse bundle
-and tests whether the tiny sparse bs16 shape contributes positively on top.
+v160: block_m=64 for bs=512/E=33 (d=512 and d=2048), was block_m=128.
+With ~15.5 tokens/expert, block_m=64 gives better CU distribution.
 """
 import os
 import functools
@@ -72,21 +71,21 @@ _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
 # With 144 token-expert pairs across 257 experts, most experts get 0-1 tokens.
 # Skipping activation quantization + using split-K may help.
 _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
-    "block_m": 32,
+    "block_m": 16,
     "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",
     "run_1stage": False,
 }
 
-# bs=128/E=257/d=256: revert to baseline ksplit=2 cktile_moe path.
+# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
+# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
-    "block_m": 32,
+    "block_m": 16,
     "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",
     "run_1stage": False,
-    "use_non_temporal_load": True,
 }
 
 # === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===
@@ -127,7 +126,7 @@ _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "block_m": 32,
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M32,  # v144: 4-WG instead of 1-WG
-    "kernelName2": _FLYDSL_STAGE2_M16_N256_K128,  # v165: widen tile_n to 256 only here
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v143: FlyDSL stage2
     "run_1stage": False,
     "use_non_temporal_load": True,
 }

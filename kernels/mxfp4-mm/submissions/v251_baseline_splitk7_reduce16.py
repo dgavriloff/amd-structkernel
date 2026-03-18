@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v256: Add `tl.assume` and `tl.max_contiguous` hints to the baseline kernel.
+v251: Restore the v211 split-K geometry and use REDUCE_BSN=16.
 
-Keep the v211 launch geometry and cache settings, but tell Triton that the
-inner N lanes and packed fp4 output lanes are contiguous while also asserting
-positive extents and contiguous inner strides on the fused quant path.
+The split-K=2 / BSN64 branch regressed on benchmark, so this returns to the
+best-known 7-way split-K configuration and re-tests only the narrower Gluon
+reduce tile that was strong in the earlier direct-dispatch lineage.
 """
 import torch
 import triton
@@ -44,7 +44,6 @@ def _get_fused_config(M, N, K):
     if K > 4096:
         # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
         # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
-        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -118,7 +117,7 @@ def _get_fused_config(M, N, K):
             "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
-            "num_warps": 4,
+            "num_warps": 2,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
@@ -160,19 +159,11 @@ def _fused_mxfp4_quant_shuffle_kernel(
     stride_x_fp4_m = tl.cast(stride_x_fp4_m_in, tl.int64)
     stride_x_fp4_n = tl.cast(stride_x_fp4_n_in, tl.int64)
 
-    tl.assume(M > 0)
-    tl.assume(N > 0)
-    tl.assume(stride_x_m > 0)
-    tl.assume(stride_x_fp4_m > 0)
-    tl.assume(stride_x_n == 1)
-    tl.assume(stride_x_fp4_n == 1)
-
     NUM_QUANT_BLOCKS: tl.constexpr = BLOCK_SIZE_N // MXFP4_QUANT_BLOCK_SIZE
 
     for pid_n in tl.range(start_n, min(start_n + NUM_ITER, N), num_stages=NUM_STAGES):
         x_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         x_offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-        x_offs_n = tl.max_contiguous(x_offs_n, BLOCK_SIZE_N)
         x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
 
         if EVEN_M_N:
@@ -190,7 +181,6 @@ def _fused_mxfp4_quant_shuffle_kernel(
         # Store fp4 output
         out_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         out_offs_n = pid_n * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
-        out_offs_n = tl.max_contiguous(out_offs_n, BLOCK_SIZE_N // 2)
         out_offs = (
             out_offs_m[:, None] * stride_x_fp4_m + out_offs_n[None, :] * stride_x_fp4_n
         )
@@ -256,7 +246,7 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
 
     # Reduce kernel params — gluon version uses BSN=64 for fp32 partials
     REDUCE_BSM = 16
-    REDUCE_BSN = 64  # Gluon default for fp32 partials
+    REDUCE_BSN = 16  # Narrower reduce tiles previously improved split-K LB
     ACTUAL_KSPLIT = triton.cdiv(K_kernel, (SPLITK_BLOCK_SIZE // 2))
     reduce_grid = (triton.cdiv(M, REDUCE_BSM), triton.cdiv(N, REDUCE_BSN))
 

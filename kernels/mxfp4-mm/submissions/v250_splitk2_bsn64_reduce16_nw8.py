@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v256: Add `tl.assume` and `tl.max_contiguous` hints to the baseline kernel.
+v250: Raise num_warps to 8 on the BSN64 split-K=2 + REDUCE_BSN=16 branch.
 
-Keep the v211 launch geometry and cache settings, but tell Triton that the
-inner N lanes and packed fp4 output lanes are contiguous while also asserting
-positive extents and contiguous inner strides on the fused quant path.
+For the 16x2112x7168 split-K shape, keep the v249 low-reduction geometry but
+increase warp-level parallelism on the narrower-N split-K branch to test
+whether it is still latency-limited at 4 warps.
 """
 import torch
 import triton
@@ -42,20 +42,19 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
-        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
-        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
+        # Split-K=2 with BSK=512 and BSN=64 for large-K shapes (e.g., 16x2112x7168)
+        # This doubles the GEMM grid from 68 to 132 blocks versus BSN=128.
         return {
             "BLOCK_SIZE_M": 8,
-            "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 256,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_K": 512,
             "GROUP_SIZE_M": 1,
-            "num_warps": 4,
+            "num_warps": 8,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
-            "NUM_KSPLIT": 7,
+            "NUM_KSPLIT": 2,
         }
     if M <= 4:
         return {
@@ -118,7 +117,7 @@ def _get_fused_config(M, N, K):
             "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
-            "num_warps": 4,
+            "num_warps": 2,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
@@ -160,19 +159,11 @@ def _fused_mxfp4_quant_shuffle_kernel(
     stride_x_fp4_m = tl.cast(stride_x_fp4_m_in, tl.int64)
     stride_x_fp4_n = tl.cast(stride_x_fp4_n_in, tl.int64)
 
-    tl.assume(M > 0)
-    tl.assume(N > 0)
-    tl.assume(stride_x_m > 0)
-    tl.assume(stride_x_fp4_m > 0)
-    tl.assume(stride_x_n == 1)
-    tl.assume(stride_x_fp4_n == 1)
-
     NUM_QUANT_BLOCKS: tl.constexpr = BLOCK_SIZE_N // MXFP4_QUANT_BLOCK_SIZE
 
     for pid_n in tl.range(start_n, min(start_n + NUM_ITER, N), num_stages=NUM_STAGES):
         x_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         x_offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-        x_offs_n = tl.max_contiguous(x_offs_n, BLOCK_SIZE_N)
         x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
 
         if EVEN_M_N:
@@ -190,7 +181,6 @@ def _fused_mxfp4_quant_shuffle_kernel(
         # Store fp4 output
         out_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         out_offs_n = pid_n * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
-        out_offs_n = tl.max_contiguous(out_offs_n, BLOCK_SIZE_N // 2)
         out_offs = (
             out_offs_m[:, None] * stride_x_fp4_m + out_offs_n[None, :] * stride_x_fp4_n
         )
@@ -256,7 +246,7 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
 
     # Reduce kernel params — gluon version uses BSN=64 for fp32 partials
     REDUCE_BSM = 16
-    REDUCE_BSN = 64  # Gluon default for fp32 partials
+    REDUCE_BSN = 16  # Narrower reduce tiles previously improved split-K LB
     ACTUAL_KSPLIT = triton.cdiv(K_kernel, (SPLITK_BLOCK_SIZE // 2))
     reduce_grid = (triton.cdiv(M, REDUCE_BSM), triton.cdiv(N, REDUCE_BSN))
 

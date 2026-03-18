@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v256: Add `tl.assume` and `tl.max_contiguous` hints to the baseline kernel.
+v254: Add `tl.multiple_of` hints on top of the successful `tl.assume` baseline.
 
-Keep the v211 launch geometry and cache settings, but tell Triton that the
-inner N lanes and packed fp4 output lanes are contiguous while also asserting
-positive extents and contiguous inner strides on the fused quant path.
+Keep the v253 compiler-guidance change and add alignment-style facts that
+follow from the kernel contract: K is divisible by 64, bf16 rows are aligned to
+32-element quant groups, and packed fp4 rows are aligned to 16-byte groups.
 """
 import torch
 import triton
@@ -44,7 +44,6 @@ def _get_fused_config(M, N, K):
     if K > 4096:
         # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
         # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
-        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -166,13 +165,14 @@ def _fused_mxfp4_quant_shuffle_kernel(
     tl.assume(stride_x_fp4_m > 0)
     tl.assume(stride_x_n == 1)
     tl.assume(stride_x_fp4_n == 1)
+    tl.multiple_of(stride_x_m, MXFP4_QUANT_BLOCK_SIZE)
+    tl.multiple_of(stride_x_fp4_m, MXFP4_QUANT_BLOCK_SIZE // 2)
 
     NUM_QUANT_BLOCKS: tl.constexpr = BLOCK_SIZE_N // MXFP4_QUANT_BLOCK_SIZE
 
     for pid_n in tl.range(start_n, min(start_n + NUM_ITER, N), num_stages=NUM_STAGES):
         x_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         x_offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
-        x_offs_n = tl.max_contiguous(x_offs_n, BLOCK_SIZE_N)
         x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
 
         if EVEN_M_N:
@@ -190,7 +190,6 @@ def _fused_mxfp4_quant_shuffle_kernel(
         # Store fp4 output
         out_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         out_offs_n = pid_n * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
-        out_offs_n = tl.max_contiguous(out_offs_n, BLOCK_SIZE_N // 2)
         out_offs = (
             out_offs_m[:, None] * stride_x_fp4_m + out_offs_n[None, :] * stride_x_fp4_n
         )
