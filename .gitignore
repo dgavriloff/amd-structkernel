@@ -12,3 +12,6 @@ orchestrator/.next_id
 orchestrator/.next_id.lock
 orchestrator/run/
 kernels/*/state/subagents.jsonl
+kernels/*/state/snapshots/
+kernels/*/state/submit_*.log
+state/submit-queue/

@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v236: Split-K path uses BLOCK_SIZE_K=512, NUM_KSPLIT=2, BLOCK_SIZE_N=64, num_stages=2, GROUP_SIZE_M=2, and num_warps=8.
+v232: Split-K path uses BLOCK_SIZE_K=512 with NUM_KSPLIT=2 and num_stages=1.
 
-This keeps the best BSN64 two-way split-K branch so far while testing whether
-the narrower tiles benefit from higher warp-level latency hiding.
+This keeps the two-way split-K geometry for the 16x2112x7168 shape while
+testing whether the larger K tile benefits from lower pipelining pressure.
 """
 import torch
 import triton
@@ -41,15 +41,16 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Split-K=2 with BSK=512 and BSN=64 for large-K shapes (e.g., 16x2112x7168)
-        # This doubles the GEMM grid from 68 to 132 blocks versus BSN=128.
+        # Split-K=2 with BSK=512 for large-K shapes (e.g., 16x2112x7168)
+        # Only 68 blocks, but much less reduction work than the 7-way baseline.
+        # num_stages=1 tests whether the larger tile prefers less pipelining.
         return {
             "BLOCK_SIZE_M": 8,
-            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 512,
-            "GROUP_SIZE_M": 2,
-            "num_warps": 8,
-            "num_stages": 2,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 4,
+            "num_stages": 1,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",

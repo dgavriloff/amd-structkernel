@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v236: Split-K path uses BLOCK_SIZE_K=512, NUM_KSPLIT=2, BLOCK_SIZE_N=64, num_stages=2, GROUP_SIZE_M=2, and num_warps=8.
+v235: Split-K path uses BLOCK_SIZE_K=512, NUM_KSPLIT=2, BLOCK_SIZE_N=64, num_stages=2, and GROUP_SIZE_M=2.
 
-This keeps the best BSN64 two-way split-K branch so far while testing whether
-the narrower tiles benefit from higher warp-level latency hiding.
+This keeps the higher-occupancy BSN64 branch while pairing the two M tiles per
+problem so they traverse the same B tiles back-to-back.
 """
 import torch
 import triton
@@ -48,7 +48,7 @@ def _get_fused_config(M, N, K):
             "BLOCK_SIZE_N": 64,
             "BLOCK_SIZE_K": 512,
             "GROUP_SIZE_M": 2,
-            "num_warps": 8,
+            "num_warps": 4,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,

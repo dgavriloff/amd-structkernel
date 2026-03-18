@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v171: Add bs=16/E=257 cktile block_m=32 on top of the bs=512/E=257 t16x256x128 stage2.
-Keep the v160 best everywhere else, and test whether the tiny sparse E=257
-shape benefits from a larger cktile block without reintroducing bs=128 regressions.
+v170: FlyDSL t16x256x128 stage2 only for bs=512/E=257/d=256.
+Keep the v160 best everywhere else, and isolate the bs=512 sparse E=257
+stage2 widening after the combined bs=128+bs=512 variant regressed BM.
 """
 import os
 import functools
@@ -72,7 +72,7 @@ _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
 # With 144 token-expert pairs across 257 experts, most experts get 0-1 tokens.
 # Skipping activation quantization + using split-K may help.
 _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
-    "block_m": 32,
+    "block_m": 16,
     "ksplit": 2,
     "kernelName1": "",
     "kernelName2": "",

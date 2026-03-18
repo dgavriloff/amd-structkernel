@@ -3,7 +3,7 @@
 ## How to Run
 1. Launch one Codex worker per kernel using `./orchestrator/launch-codex-subagent.sh --kernel <name>` — launch all three in parallel.
 2. Confirm workers are running via `./orchestrator/status.sh`.
-3. Start `/loop 10m` to check status and relaunch any dead workers every 10 minutes.
+3. Start `/loop 10m` to check status, relaunch dead workers, and nudge idle workers every 10 minutes.
 
 ## Kernel Set
 - `mixed-mla`

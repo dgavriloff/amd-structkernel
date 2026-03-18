@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v236: Split-K path uses BLOCK_SIZE_K=512, NUM_KSPLIT=2, BLOCK_SIZE_N=64, num_stages=2, GROUP_SIZE_M=2, and num_warps=8.
+v230: M=64 fused path uses num_warps=2 (from 4).
 
-This keeps the best BSN64 two-way split-K branch so far while testing whether
-the narrower tiles benefit from higher warp-level latency hiding.
+This keeps the proven 16x128x256 tile family and double-buffered pipeline for
+the 64x7168x2048 shape while testing lower warp count for reduced pressure.
 """
 import torch
 import triton
@@ -41,19 +41,20 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Split-K=2 with BSK=512 and BSN=64 for large-K shapes (e.g., 16x2112x7168)
-        # This doubles the GEMM grid from 68 to 132 blocks versus BSN=128.
+        # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
+        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
+        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
             "BLOCK_SIZE_M": 8,
-            "BLOCK_SIZE_N": 64,
-            "BLOCK_SIZE_K": 512,
-            "GROUP_SIZE_M": 2,
-            "num_warps": 8,
+            "BLOCK_SIZE_N": 128,
+            "BLOCK_SIZE_K": 256,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 4,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
-            "NUM_KSPLIT": 2,
+            "NUM_KSPLIT": 7,
         }
     if M <= 4:
         return {
@@ -108,7 +109,7 @@ def _get_fused_config(M, N, K):
             "NUM_KSPLIT": 1,
         }
     else:
-        # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
+        # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=2 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
         # waves_per_eu=2: hint for higher occupancy per EU
         return {
@@ -116,7 +117,7 @@ def _get_fused_config(M, N, K):
             "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
-            "num_warps": 4,
+            "num_warps": 2,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,

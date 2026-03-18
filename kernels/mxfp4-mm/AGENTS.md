@@ -7,13 +7,22 @@
    - If prior attempts found: prints them, exits 1
    - Use `--override "reason this is different"` to proceed anyway
 4. Get next version: `V=$(./tools/next_version.sh)`. Edit submission.py, archive: `cp submission.py submissions/v${V}_description.py`
-5. `./tools/submit.sh test`
-6. Use benchmark mode as the main ranking loop when quota is available. Use leaderboard mode sparingly as the scarcest confirmation resource.
-7. Only spend a leaderboard submission on the strongest current candidate. If leaderboard quota is exhausted, keep researching, benchmarking, and queueing the best next candidate instead of stopping.
-8. Treat `test` as the correctness gate, `bm` as the main search loop, and `leaderboard` as confirmation.
-9. Adapt to the limits reported by the tools. Do not assume fixed rates. If any quota is exhausted, switch to work that does not spend that quota.
-10. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
-11. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh --what-failed "summary of what was attempted"`, then `exit`
+5. `./tools/submit.sh test` — this returns immediately. Do NOT wait for results.
+6. `./tools/submit.sh benchmark` — also returns immediately.
+7. Continue working on your next hypothesis while submissions are in flight.
+8. Results arrive as messages at your prompt in the format: `[SUBMIT RESULT] v<N> <mode> <outcome>`. Act on them when they arrive.
+9. Use benchmark mode as the main ranking loop. Use leaderboard mode sparingly as the scarcest confirmation resource.
+10. Only spend a leaderboard submission on the strongest current candidate. If leaderboard quota is exhausted, keep researching and benchmarking.
+11. Treat `test` as the correctness gate, `benchmark` as the main search loop, and `leaderboard` as confirmation.
+12. Adapt to the limits reported by the tools. Do not assume fixed rates. If any quota is exhausted, switch to work that does not spend that quota.
+13. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
+14. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh --what-failed "summary of what was attempted"`, then `exit`
+
+## Async Submissions
+- `./tools/submit.sh` queues your submission and returns instantly. Do NOT block or poll for results.
+- Results are delivered to your prompt as `[SUBMIT RESULT]` messages. Process them when they arrive.
+- You can have multiple submissions in flight. Keep working between submissions.
+- Never call `popcorn-cli` directly — always use `./tools/submit.sh`.
 
 ## Scoring
 - The best score in `best.json` is a leaderboard geomean computed from **random inputs**, so it has variance run-to-run. Small differences (±1-3%) can be noise.

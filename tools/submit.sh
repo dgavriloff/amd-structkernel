@@ -1,19 +1,17 @@
 #!/bin/bash
-# Submit to popcorn and auto-update state.
-# Usage: ./tools/submit.sh <test|leaderboard>
-# - Rejects if no proposal registered in current session
-# - On leaderboard: compares to best.json, prints KEEP or REVERT, updates state
+# Async submit — runs popcorn-cli in the background, delivers result to agent.
+# Usage: ./tools/submit.sh <test|benchmark|leaderboard>
+# Returns immediately. Result is sent to your prompt when ready.
 
 set -euo pipefail
 KERNEL_DIR="$(pwd)"
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 STATE_DIR="$KERNEL_DIR/state"
-BEST_FILE="$STATE_DIR/best.json"
-TRIED_FILE="$STATE_DIR/tried.jsonl"
 SESSIONS_DIR="$STATE_DIR/sessions"
 
 MODE="${1:-}"
 if [ -z "$MODE" ]; then
-    echo "Usage: ./tools/submit.sh <test|leaderboard>"
+    echo "Usage: ./tools/submit.sh <test|benchmark|leaderboard>"
     exit 2
 fi
 
@@ -38,133 +36,22 @@ if [ -z "$LEADERBOARD" ]; then
     exit 1
 fi
 
-# Get current version number from submission.py header
 VERSION=$(head -20 "$KERNEL_DIR/submission.py" | grep -oE 'v[0-9]+' | head -1 | tr -d 'v' || echo "0")
+KERNEL=$(basename "$KERNEL_DIR")
+TMUX_SESSION="codex-${KERNEL}-${SESSION_ID}"
 
-echo "=== Submitting in $MODE mode (v$VERSION) ==="
+# Snapshot submission.py so the agent can keep editing
+SNAPSHOT_DIR="$STATE_DIR/snapshots"
+mkdir -p "$SNAPSHOT_DIR"
+SNAPSHOT="$SNAPSHOT_DIR/v${VERSION}_${MODE}_$(date +%s).py"
+cp "$KERNEL_DIR/submission.py" "$SNAPSHOT"
 
-# Run popcorn
-cd "$KERNEL_DIR"
-RESULT=$(popcorn-cli submit --gpu MI355X --leaderboard "$LEADERBOARD" --mode "$MODE" --no-tui submission.py 2>&1)
-echo "$RESULT"
+echo "=== Submitted v$VERSION for $MODE (background) ==="
+echo "Results will be delivered to your prompt when ready."
+echo "Continue working — do not wait."
 
-# Log to session file
-if [ "$MODE" = "test" ]; then
-    if echo "$RESULT" | grep -qi "pass"; then
-        TEST_RESULT="pass"
-    else
-        TEST_RESULT="fail"
-    fi
-    python3 -c "
-import json, datetime
-d = {'action': 'submit', 'mode': 'test', 'v': $VERSION, 'result': '$TEST_RESULT', 'ts': datetime.datetime.now(datetime.UTC).isoformat() + 'Z'}
-print(json.dumps(d))
-" >> "$SESSION_FILE"
-
-elif [ "$MODE" = "leaderboard" ]; then
-    # Compute geomean from Ranked Benchmark ⏱ lines (normalizing ms → µs)
-    SCORE=$(echo "$RESULT" | python3 -c "
-import sys, re, math
-text = sys.stdin.read()
-# Find the Ranked Benchmark section
-idx = text.find('Ranked Benchmark')
-if idx == -1:
-    idx = text.find('ranked benchmark')
-if idx == -1:
-    idx = text.find('Ranked benchmark')
-if idx == -1:
-    print('ERROR: No Ranked Benchmark section found in output', file=sys.stderr)
-    sys.exit(1)
-ranked_section = text[idx:]
-# Extract mean times with units: ⏱ 91.6 ± ... µs  OR  ⏱ 2.02 ± ... ms
-entries = re.findall(r'⏱\s+([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', ranked_section)
-if not entries:
-    # Fallback: any number before ± with a unit
-    entries = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', ranked_section)
-if not entries:
-    print('ERROR: No timing values found in Ranked Benchmark section', file=sys.stderr)
-    sys.exit(1)
-# Normalize all to µs
-times_us = []
-for val, unit in entries:
-    t = float(val)
-    if unit == 'ms':
-        t *= 1000.0
-    times_us.append(t)
-geomean = math.exp(sum(math.log(t) for t in times_us) / len(times_us))
-print(f'{geomean:.2f}')
-" || echo "")
-
-    if [ -z "$SCORE" ]; then
-        echo "WARNING: Could not extract score from output."
-        echo "DEBUG: Dumping first 100 lines of RESULT:"
-        echo "$RESULT" | head -100
-        echo "---END DEBUG---"
-        echo "REVERT — could not parse score."
-        python3 -c "
-import json, datetime
-d = {'action': 'submit', 'mode': 'leaderboard', 'v': $VERSION, 'score': None, 'best': None, 'kept': False, 'reason': 'could not parse score', 'ts': datetime.datetime.now(datetime.UTC).isoformat() + 'Z'}
-print(json.dumps(d))
-" >> "$SESSION_FILE"
-        cp "$KERNEL_DIR/best_submission.py" "$KERNEL_DIR/submission.py"
-        exit 0
-    fi
-
-    # Compare to best
-    BEST_SCORE=$(python3 -c "import json; print(json.load(open('$BEST_FILE'))['score'])")
-    BEST_VERSION=$(python3 -c "import json; print(json.load(open('$BEST_FILE'))['version'])")
-
-    IMPROVED=$(python3 -c "print('yes' if float('$SCORE') < float('$BEST_SCORE') * 0.999 else 'no')")
-
-    # Get the latest proposal's what/keywords from session file
-    PROP_WHAT=$(grep '"action": "propose"' "$SESSION_FILE" | tail -1 | python3 -c "import sys,json; print(json.load(sys.stdin)['what'])")
-    PROP_KEYWORDS=$(grep '"action": "propose"' "$SESSION_FILE" | tail -1 | python3 -c "import sys,json; print(json.dumps(json.load(sys.stdin)['keywords']))")
-
-    if [ "$IMPROVED" = "yes" ]; then
-        CHANGE=$(python3 -c "print(f'{(float(\"$SCORE\") / float(\"$BEST_SCORE\") - 1) * 100:.1f}%')")
-        echo ""
-        echo "════════════════════════════════════"
-        echo "  KEEP — v$VERSION @ ${SCORE}µs ($CHANGE vs v$BEST_VERSION @ ${BEST_SCORE}µs)"
-        echo "════════════════════════════════════"
-
-        # Update best.json
-        python3 -c "
-import json, datetime
-d = {'version': $VERSION, 'score': float('$SCORE'), 'ts': datetime.datetime.now(datetime.UTC).isoformat() + 'Z'}
-json.dump(d, open('$BEST_FILE', 'w'))
-"
-        cp "$KERNEL_DIR/submission.py" "$KERNEL_DIR/best_submission.py"
-
-        # Log to tried.jsonl
-        _WHAT="$PROP_WHAT" python3 -c "
-import json, datetime, os
-d = {'v': $VERSION, 'what': os.environ['_WHAT'], 'keywords': $PROP_KEYWORDS, 'score': float('$SCORE'), 'kept': True, 'reason': 'improved geomean', 'session': $SESSION_ID}
-print(json.dumps(d))
-" >> "$TRIED_FILE"
-
-        # Auto-commit on KEEP
-        cd "$KERNEL_DIR" && git add -A && git commit -m "v${VERSION}: KEEP — ${PROP_WHAT} (${CHANGE})"
-    else
-        CHANGE=$(python3 -c "print(f'{(float(\"$SCORE\") / float(\"$BEST_SCORE\") - 1) * 100:+.1f}%')")
-        echo ""
-        echo "════════════════════════════════════"
-        echo "  REVERT — v$VERSION @ ${SCORE}µs ($CHANGE vs v$BEST_VERSION @ ${BEST_SCORE}µs)"
-        echo "════════════════════════════════════"
-
-        cp "$KERNEL_DIR/best_submission.py" "$KERNEL_DIR/submission.py"
-
-        # Log to tried.jsonl
-        _WHAT="$PROP_WHAT" python3 -c "
-import json, datetime, os
-d = {'v': $VERSION, 'what': os.environ['_WHAT'], 'keywords': $PROP_KEYWORDS, 'score': float('$SCORE'), 'kept': False, 'reason': '$CHANGE vs best', 'session': $SESSION_ID}
-print(json.dumps(d))
-" >> "$TRIED_FILE"
-    fi
-
-    # Log to session file
-    python3 -c "
-import json, datetime
-d = {'action': 'submit', 'mode': 'leaderboard', 'v': $VERSION, 'score': float('$SCORE'), 'best': float('$BEST_SCORE'), 'kept': $( [ "$IMPROVED" = "yes" ] && echo "True" || echo "False"), 'ts': datetime.datetime.now(datetime.UTC).isoformat() + 'Z'}
-print(json.dumps(d))
-" >> "$SESSION_FILE"
-fi
+# Launch background worker via tmux to ensure it survives Codex shell teardown
+BG_SESSION="bg-${KERNEL}-v${VERSION}-${MODE}"
+tmux kill-session -t "$BG_SESSION" 2>/dev/null || true
+tmux new-session -d -s "$BG_SESSION" \
+    "exec $REPO_DIR/tools/_submit_bg.sh $KERNEL_DIR $REPO_DIR $LEADERBOARD $MODE $SNAPSHOT $VERSION $SESSION_FILE $STATE_DIR $SESSION_ID $TMUX_SESSION"
