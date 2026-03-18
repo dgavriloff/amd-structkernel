@@ -51,23 +51,44 @@ def main():
     snapshot_file = sys.argv[8] if len(sys.argv) > 8 else None
 
     result = sys.stdin.read()
+    rate_limit_match = re.search(
+        r'Rate limit exceeded:\s*(\d+)/(\d+)\s+(\w+)\s+submissions per hour\. Try again in\s+(\d+)s',
+        result,
+        re.IGNORECASE,
+    )
 
     if mode == 'test':
-        test_result = 'pass' if re.search(r'pass', result, re.IGNORECASE) else 'fail'
+        if rate_limit_match:
+            kind = rate_limit_match.group(3).lower()
+            wait_s = int(rate_limit_match.group(4))
+            test_result = 'blocked'
+            print(f'[SUBMIT RESULT] v{version} test BLOCKED ({kind} quota, retry in {wait_s}s)')
+        else:
+            test_result = 'pass' if re.search(r'pass', result, re.IGNORECASE) else 'fail'
+            print(f'[SUBMIT RESULT] v{version} test {test_result.upper()}')
         log_event(session_file, {
             'action': 'submit', 'mode': 'test', 'v': version,
             'result': test_result, 'ts': ts()
         })
-        print(f'[SUBMIT RESULT] v{version} test {test_result.upper()}')
 
     elif mode == 'benchmark':
-        score = geomean_from_text(result)
-        if score:
-            print(f'[SUBMIT RESULT] v{version} benchmark geomean={score:.2f}µs')
+        if rate_limit_match:
+            kind = rate_limit_match.group(3).lower()
+            wait_s = int(rate_limit_match.group(4))
+            print(f'[SUBMIT RESULT] v{version} benchmark BLOCKED ({kind} quota, retry in {wait_s}s)')
         else:
-            print(f'[SUBMIT RESULT] v{version} benchmark completed (could not parse geomean)')
+            score = geomean_from_text(result)
+            if score:
+                print(f'[SUBMIT RESULT] v{version} benchmark geomean={score:.2f}µs')
+            else:
+                print(f'[SUBMIT RESULT] v{version} benchmark completed (could not parse geomean)')
 
     elif mode == 'leaderboard':
+        if rate_limit_match:
+            kind = rate_limit_match.group(3).lower()
+            wait_s = int(rate_limit_match.group(4))
+            print(f'[SUBMIT RESULT] v{version} leaderboard BLOCKED ({kind} quota, retry in {wait_s}s)')
+            return
         score = geomean_from_text(result, ranked_only=True)
 
         if score is None:

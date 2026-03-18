@@ -18,6 +18,7 @@ TMUX_SESSION="${10}"
 
 # Run popcorn-cli
 RESULT=$(cd "$KERNEL_DIR" && popcorn-cli submit --gpu MI355X --leaderboard "$LEADERBOARD" --mode "$MODE" --no-tui "$SNAPSHOT" 2>&1) || true
+printf '%s\n' "$RESULT" > "$STATE_DIR/submit_v${VERSION}_${MODE}.log"
 
 # Process result
 MESSAGE=$(echo "$RESULT" | python3 "$REPO_DIR/tools/_process_result.py" \
@@ -26,12 +27,22 @@ MESSAGE=$(echo "$RESULT" | python3 "$REPO_DIR/tools/_process_result.py" \
 
 # Deliver to agent
 if [ -n "$MESSAGE" ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
-    # If revert limit reached, interrupt current turn first so the agent processes it immediately
-    if echo "$MESSAGE" | grep -q "REVERT LIMIT REACHED"; then
-        tmux send-keys -t "$TMUX_SESSION" Escape
-        sleep 3
-        tmux send-keys -t "$TMUX_SESSION" Enter
-        sleep 1
-    fi
     tmux send-keys -t "$TMUX_SESSION" "$MESSAGE" Enter Enter
+fi
+
+# If revert limit reached, run close_branch.sh ourselves and kill the agent
+if echo "$MESSAGE" | grep -q "REVERT LIMIT REACHED"; then
+    # Summarize what failed from session file
+    SUMMARY=$(python3 -c "
+import json, sys
+props = []
+with open('$SESSION_FILE') as f:
+    for line in f:
+        e = json.loads(line)
+        if e.get('action') == 'propose':
+            props.append(e.get('what',''))
+print('Attempted: ' + '; '.join(props[-5:]) if props else 'no proposals')
+" 2>/dev/null || echo "5 leaderboard reverts reached")
+
+    cd "$KERNEL_DIR" && AGENT_SESSION_ID="$SESSION_ID" ./tools/close_branch.sh --what-failed "$SUMMARY" 2>/dev/null || true
 fi

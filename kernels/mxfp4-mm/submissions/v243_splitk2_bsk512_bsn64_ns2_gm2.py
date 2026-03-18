@@ -2,11 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v247: Use BLOCK_SIZE_K=384 for the M=64 fused path.
+v243: Split-K path uses BLOCK_SIZE_K=512, NUM_KSPLIT=2, BLOCK_SIZE_N=64, num_stages=2, and GROUP_SIZE_M=2.
 
-For 64x7168x2048, keep the proven 16x128 tile family and double-buffered
-pipeline, but reduce the K-loop from 8 iterations to 6. This tests whether
-the baseline is slightly over-sliced in K for the 64-row fused branch.
+This keeps the higher-occupancy BSN64 branch while pairing the two M tiles per
+problem so they traverse the same B tiles back-to-back.
 """
 import torch
 import triton
@@ -42,20 +41,19 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
-        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
-        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
+        # Split-K=2 with BSK=512 and BSN=64 for large-K shapes (e.g., 16x2112x7168)
+        # This doubles the GEMM grid from 68 to 132 blocks versus BSN=128.
         return {
             "BLOCK_SIZE_M": 8,
-            "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 256,
-            "GROUP_SIZE_M": 1,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_K": 512,
+            "GROUP_SIZE_M": 2,
             "num_warps": 4,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
-            "NUM_KSPLIT": 7,
+            "NUM_KSPLIT": 2,
         }
     if M <= 4:
         return {
@@ -116,7 +114,7 @@ def _get_fused_config(M, N, K):
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 384,
+            "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,

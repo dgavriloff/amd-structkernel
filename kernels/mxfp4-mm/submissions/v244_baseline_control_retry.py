@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v247: Use BLOCK_SIZE_K=384 for the M=64 fused path.
+v244: Resubmit the known best baseline unchanged as a control candidate.
 
-For 64x7168x2048, keep the proven 16x128 tile family and double-buffered
-pipeline, but reduce the K-loop from 8 iterations to 6. This tests whether
-the baseline is slightly over-sliced in K for the 64-row fused branch.
+For K=512 BSM=8 BSN=128 BSK=256, B data per block is 32KB FP4.
+Without .cg, L1 caching improves latency for 2 K-iterations.
+AMD library default uses null for this config.
 """
 import torch
 import triton
@@ -116,7 +116,7 @@ def _get_fused_config(M, N, K):
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 384,
+            "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,

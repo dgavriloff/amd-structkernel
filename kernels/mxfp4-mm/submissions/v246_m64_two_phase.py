@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v247: Use BLOCK_SIZE_K=384 for the M=64 fused path.
+v246: Route M=64 to two-phase quant+ASM by lowering FUSED_M_THRESHOLD to 32.
 
-For 64x7168x2048, keep the proven 16x128 tile family and double-buffered
-pipeline, but reduce the K-loop from 8 iterations to 6. This tests whether
-the baseline is slightly over-sliced in K for the 64-row fused branch.
+Historical notes for 64x7168x2048 show the fused preshuffle path around
+13.5 us BM, while quant + 32x128 ASM GEMM should land closer to 10 us.
+Keep the v211-era M<=32 cache=None tuning unchanged and only move M=64.
 """
 import torch
 import triton
@@ -34,7 +34,7 @@ _buffers = {}
 _ASM_KERNEL_32x128 = "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E"
 
 # Threshold: use fused for M <= this value
-_FUSED_M_THRESHOLD = 64
+_FUSED_M_THRESHOLD = 32
 
 
 def _get_fused_config(M, N, K):
@@ -116,7 +116,7 @@ def _get_fused_config(M, N, K):
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 384,
+            "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,

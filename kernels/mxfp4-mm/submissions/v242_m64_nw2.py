@@ -2,11 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v247: Use BLOCK_SIZE_K=384 for the M=64 fused path.
+v242: M=64 fused path uses num_warps=2 (from 4).
 
-For 64x7168x2048, keep the proven 16x128 tile family and double-buffered
-pipeline, but reduce the K-loop from 8 iterations to 6. This tests whether
-the baseline is slightly over-sliced in K for the 64-row fused branch.
+This keeps the proven 16x128x256 tile family and double-buffered pipeline for
+the 64x7168x2048 shape while testing lower warp count for reduced pressure.
 """
 import torch
 import triton
@@ -110,15 +109,15 @@ def _get_fused_config(M, N, K):
             "NUM_KSPLIT": 1,
         }
     else:
-        # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
+        # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=2 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
         # waves_per_eu=2: hint for higher occupancy per EU
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
-            "BLOCK_SIZE_K": 384,
+            "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
-            "num_warps": 4,
+            "num_warps": 2,
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
