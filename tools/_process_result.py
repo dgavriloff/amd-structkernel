@@ -11,11 +11,11 @@ import sys, re, math, json, datetime, os, subprocess
 
 def geomean_from_text(text, ranked_only=False):
     if ranked_only:
-        for label in ('Ranked Benchmark', 'ranked benchmark', 'Ranked benchmark'):
-            idx = text.find(label)
-            if idx != -1:
-                text = text[idx:]
-                break
+        # Match only the server-emitted markdown header, not kernel print() output
+        # that appears inside "## Program stdout:" sections.
+        m = re.search(r'^## Ranked Benchmark:', text, re.MULTILINE)
+        if m:
+            text = text[m.start():]
         else:
             return None
 
@@ -93,6 +93,18 @@ def main():
             wait_s = int(rate_limit_match.group(4))
             print(f'[SUBMIT RESULT] v{version} leaderboard BLOCKED ({kind} quota, retry in {wait_s}s)')
             return
+        # Reject if server reports test failure
+        if re.search(r'❌ Testing failed', result):
+            log_event(session_file, {
+                'action': 'submit', 'mode': 'leaderboard', 'v': version,
+                'score': None, 'best': None, 'kept': False,
+                'reason': 'testing failed on server', 'ts': ts()
+            })
+            subprocess.run(['cp', os.path.join(kernel_dir, 'best_submission.py'),
+                          os.path.join(kernel_dir, 'submission.py')])
+            print(f'[SUBMIT RESULT] v{version} leaderboard REVERT (testing failed on server)')
+            return
+
         score = geomean_from_text(result, ranked_only=True)
 
         if score is None:
