@@ -16,7 +16,7 @@
 11. Treat `test` as the correctness gate, `benchmark` as the main search loop, and `leaderboard` as confirmation.
 12. Adapt to the limits reported by the tools. Do not assume fixed rates. If any quota is exhausted, switch to work that does not spend that quota.
 13. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
-14. Repeat from step 2. After 5 leaderboard reverts, run `./tools/close_branch.sh --what-failed "summary of what was attempted"`, then `exit`
+14. Repeat from step 2. After 5 leaderboard reverts, the session is automatically closed and your tmux session will be terminated.
 
 ## Async Submissions
 - `./tools/submit.sh` queues your submission and returns instantly. Do NOT block or poll for results.

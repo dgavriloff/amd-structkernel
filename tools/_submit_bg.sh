@@ -44,5 +44,5 @@ with open('$SESSION_FILE') as f:
 print('Attempted: ' + '; '.join(props[-5:]) if props else 'no proposals')
 " 2>/dev/null || echo "5 leaderboard reverts reached")
 
-    cd "$KERNEL_DIR" && AGENT_SESSION_ID="$SESSION_ID" ./tools/close_branch.sh --what-failed "$SUMMARY" 2>/dev/null || true
+    cd "$KERNEL_DIR" && AGENT_SESSION_ID="$SESSION_ID" "$REPO_DIR/tools/close_branch.sh" --what-failed "$SUMMARY" 2>/dev/null || true
 fi
