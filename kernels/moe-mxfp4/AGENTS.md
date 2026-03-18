@@ -23,6 +23,7 @@
 - Results are delivered to your prompt as `[SUBMIT RESULT]` messages. Process them when they arrive.
 - You can have multiple submissions in flight. Keep working between submissions.
 - Never call `popcorn-cli` directly — always use `./tools/submit.sh`.
+- Do NOT run `tmux ls`, `tmux capture-pane`, or check background tmux sessions. Do NOT read `_submit_bg.sh` or `_process_result.py`. The delivery system is opaque — just wait for `[SUBMIT RESULT]` messages.
 
 ## Scoring
 - The best score in `best.json` is a leaderboard geomean computed from **random inputs**, so it has variance run-to-run. Small differences (±1-3%) can be noise.
