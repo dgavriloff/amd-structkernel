@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v144: Route bs=256,kv=1024 to the bf16 persistent path instead of a16w8.
-- The a16w8 ps=16 attempt failed tolerance on this exact shape.
-- bs=256,kv=1024 has the same total KV tokens as bs=32,kv=8192, where bf16 persistent is already stable.
-- This trades fp8 bandwidth for fewer pages and simpler metadata on the worst remaining 1k KV case.
+v142: Increase a16w8 page_size to 16 for bs=256,kv=1024 on top of the recovered aiter baseline.
+- Halve page metadata for the heaviest 1k KV shape at batch 256.
+- Keep the successful bf16 persistent 8k path unchanged.
+- Target the remaining benchmark hotspot without broad path churn.
 """
 
 import torch
@@ -40,8 +40,6 @@ def _get_path(batch_size, kv_seq_len):
     if batch_size <= 4 and kv_seq_len <= 1024:
         return 'bf16'
     if kv_seq_len >= 4096:
-        return 'bf16_persist'
-    if batch_size >= 256 and kv_seq_len >= 1024:
         return 'bf16_persist'
     return 'a16w8'
 
@@ -105,6 +103,8 @@ def _build_persistent_meta(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr
 def _get_cached_a16w8(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr):
     """Get or build all cached buffers for a16w8 persistent path (bf16 Q + fp8 KV)."""
     if kv_seq_len >= 4096:
+        page_size = 16
+    elif kv_seq_len >= 1024 and batch_size >= 256:
         page_size = 16
     elif kv_seq_len >= 1024 and batch_size >= 32:
         page_size = 8

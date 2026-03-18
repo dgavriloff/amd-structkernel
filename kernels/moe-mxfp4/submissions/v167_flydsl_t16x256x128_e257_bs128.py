@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v169: FlyDSL t16x256x128 stage2 for sparse E=257 shapes at bs=128 and bs=512.
-Keep the v160 best everywhere else, and widen only the sparse E=257
-stage2 tile_n from 128 to 256 while keeping tile_k=128.
+v167: CK stage1 + FlyDSL stage2 t16x256x128 for bs=128/E=257/d=256.
+Keep the current best everywhere else and widen only the bs=128/E=257 stage2
+tile_n from 128 to 256 while keeping tile_k=128.
 """
 import os
 import functools
@@ -79,8 +79,8 @@ _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
     "run_1stage": False,
 }
 
-# bs=128/E=257/d=256: CK stage1 + wider FlyDSL stage2.
-# Keep the stronger CK stage1 path from v149, but widen only stage2 tile_n.
+# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
+# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
     "block_m": 32,
     "ksplit": 0,
@@ -127,7 +127,7 @@ _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "block_m": 32,
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M32,  # v144: 4-WG instead of 1-WG
-    "kernelName2": _FLYDSL_STAGE2_M16_N256_K128,  # v169: widen tile_n to 256
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v143: FlyDSL stage2
     "run_1stage": False,
     "use_non_temporal_load": True,
 }

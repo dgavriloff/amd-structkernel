@@ -52,7 +52,7 @@ fi
 
 mkdir -p "$RUN_DIR"
 LAUNCHER="$RUN_DIR/${TMUX_SESSION}.sh"
-PROMPT="Run: export AGENT_SESSION_ID=$SESSION_ID — then read the AGENTS.md and follow the workflow. You are an AMD kernel optimization agent."
+PROMPT="Run: export AGENT_SESSION_ID=$SESSION_ID — then read the AGENTS.md and follow the workflow. You are an AMD kernel optimization agent. IMPORTANT: Do not stop after one iteration. Keep looping through the workflow (hypothesize → propose → implement → test → benchmark) continuously until you hit 5 leaderboard reverts or exhaust your budget. Never pause to summarize and wait for input — just keep going."
 
 cat > "$LAUNCHER" <<EOF
 #!/bin/bash

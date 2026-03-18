@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v169: FlyDSL t16x256x128 stage2 for sparse E=257 shapes at bs=128 and bs=512.
-Keep the v160 best everywhere else, and widen only the sparse E=257
-stage2 tile_n from 128 to 256 while keeping tile_k=128.
+v166: FlyDSL stage1 t32x256x256 wrapper for bs=512/E=33 shapes.
+Keep the v160 block_m=64 tuning and existing stage2 kernels, but replace
+the CK stage1 path with a native FlyDSL stage1 wrapper for the large E=33 shapes.
 """
 import os
 import functools
@@ -17,6 +17,7 @@ from aiter.fused_moe import fused_moe
 import aiter.fused_moe as _fused_moe_module
 import aiter
 import aiter.ops.flydsl.moe_kernels as _flydsl_moe_kernels
+import aiter.ops.flydsl as _flydsl_ops
 
 # Register FlyDSL tile_k=128 kernels that aren't in server's default registration
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"] = {
@@ -34,6 +35,10 @@ _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomi
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"] = {
     "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
     "tile_m": 16, "tile_n": 128, "tile_k": 128, "mode": "atomic", "MPerBlock": 16,
+}
+_flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe1_afp4_wfp4_bf16_t32x256x256"] = {
+    "stage": 1, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
+    "tile_m": 32, "tile_n": 256, "tile_k": 256, "MPerBlock": 32,
 }
 
 # Inject ksplit=2 configs for shapes that benefit from cktile_moe path
@@ -79,13 +84,13 @@ _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
     "run_1stage": False,
 }
 
-# bs=128/E=257/d=256: CK stage1 + wider FlyDSL stage2.
-# Keep the stronger CK stage1 path from v149, but widen only stage2 tile_n.
+# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
+# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
-    "block_m": 32,
-    "ksplit": 0,
-    "kernelName1": "moe_ck2stages_gemm1_64x32x32x128_1x1_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
-    "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic",
+    "block_m": 16,
+    "ksplit": 2,
+    "kernelName1": "",
+    "kernelName2": "",
     "run_1stage": False,
 }
 
@@ -100,11 +105,12 @@ _FLYDSL_STAGE2_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"
 _FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
 _FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
 _FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
+_FLYDSL_STAGE1_M32 = "flydsl_moe1_afp4_wfp4_bf16_t32x256x256"
 
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 64,  # v160: was 128, try 64 for better CU distribution
     "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128,
+    "kernelName1": _FLYDSL_STAGE1_M32,  # v166: native FlyDSL stage1
     "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
     "run_1stage": False,
 }
@@ -114,7 +120,7 @@ _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
 _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
     "block_m": 64,  # v160: was 128, try 64
     "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128,
+    "kernelName1": _FLYDSL_STAGE1_M32,  # v166: native FlyDSL stage1
     "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=512
     "run_1stage": False,
 }
@@ -127,12 +133,50 @@ _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "block_m": 32,
     "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M32,  # v144: 4-WG instead of 1-WG
-    "kernelName2": _FLYDSL_STAGE2_M16_N256_K128,  # v169: widen tile_n to 256
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v143: FlyDSL stage2
     "run_1stage": False,
     "use_non_temporal_load": True,
 }
 
 _injected = False
+
+
+def _flydsl_stage1_wrapper(
+    hidden_states, w1, w2,
+    sorted_token_ids, sorted_expert_ids, num_valid_ids,
+    out, topk,
+    block_m=32,
+    a1_scale=None, w1_scale=None,
+    sorted_weights=None,
+    kernelName="",
+    **_kwargs,
+):
+    parsed = _flydsl_moe_kernels.get_flydsl_kernel_params(kernelName)
+    if parsed is None:
+        raise ValueError(f"Invalid FlyDSL stage1 kernel name: {kernelName}")
+
+    if w1_scale is not None and w1.dtype == torch.float4_e2m1fn_x2:
+        w1_scale = w1_scale.view(torch.float8_e8m0fnu)
+
+    _flydsl_ops.flydsl_moe_stage1(
+        a=hidden_states,
+        w1=w1,
+        sorted_token_ids=sorted_token_ids,
+        sorted_expert_ids=sorted_expert_ids,
+        num_valid_ids=num_valid_ids,
+        out=out,
+        topk=topk,
+        tile_m=parsed["tile_m"],
+        tile_n=parsed["tile_n"],
+        tile_k=parsed["tile_k"],
+        a_dtype=parsed["a_dtype"],
+        b_dtype=parsed["b_dtype"],
+        out_dtype=parsed["out_dtype"],
+        w1_scale=w1_scale,
+        a1_scale=a1_scale,
+        sorted_weights=sorted_weights,
+    )
+    return out
 
 def _inject_configs():
     global _injected
@@ -184,7 +228,22 @@ def _inject_configs():
             str(q_type), use_g1u1, doweight_stage1,
         )
         cfg = _fused_moe_module.cfg_2stages.get(keys)
-        if cfg and cfg.get("use_non_temporal_load") is not None:
+        if cfg is None:
+            return metadata
+
+        kn1 = str(cfg.get("kernelName1", ""))
+        if kn1.startswith("flydsl_"):
+            metadata = _fused_moe_module.MOEMetadata(
+                functools.partial(_flydsl_stage1_wrapper, kernelName=kn1),
+                metadata.stage2,
+                metadata.block_m,
+                metadata.ksplit,
+                metadata.run_1stage,
+                metadata.has_bias,
+                metadata.use_non_temporal_load,
+            )
+
+        if cfg.get("use_non_temporal_load") is not None:
             nt = cfg["use_non_temporal_load"]
             # Rebuild stage1 partial with NT override
             old_s1 = metadata.stage1
