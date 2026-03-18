@@ -2,8 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v173: Revert the bs=64 8k kv_granularity tweak and keep only the non-fast metadata planner.
-This drops the benchmark-broken shape-specific metadata override while preserving the recovered routing:
+v172: Add a bs=64 8k kv_granularity tweak on top of the staged non-fast metadata planner.
+This keeps the same routing and parser preamble while coarsening only the medium-large bf16-persistent split unit:
 - bf16 non-persistent for bs<=4,kv<=1024
 - bf16 persistent page_size=64 for all kv>=4096
 - a16w8 persistent elsewhere
@@ -155,12 +155,49 @@ def _get_cached_bf16(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr):
 
 def _get_cached_bf16_persist(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr):
     page_size = 64
-    key = ("bf16_persist", batch_size, kv_seq_len, page_size)
+    kv_granularity = 32 if batch_size == 64 and kv_seq_len >= 4096 else max(page_size, 16)
+    key = ("bf16_persist", batch_size, kv_seq_len, page_size, kv_granularity)
     if key in _cache:
         return _cache[key]
     cached = _build_persistent_meta(
         batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr, torch.bfloat16, torch.bfloat16, page_size
     )
+    meta, kv_indices, kv_last_page_len, kv_indptr_use, page_size, o = cached
+    if kv_granularity != max(page_size, 16):
+        info = get_mla_metadata_info_v1(
+            batch_size, 1, NUM_HEADS, torch.bfloat16, torch.bfloat16,
+            is_sparse=False, fast_mode=False,
+            num_kv_splits=NUM_KV_SPLITS, intra_batch_mode=True,
+        )
+        work = [torch.empty(s, dtype=t, device="cuda") for s, t in info]
+        (work_metadata, work_indptr, work_info_set,
+         reduce_indptr, reduce_final_map, reduce_partial_map) = work
+        get_mla_metadata_v1(
+            qo_indptr, kv_indptr_use, kv_last_page_len,
+            NUM_HEADS // NUM_KV_HEADS,
+            NUM_KV_HEADS,
+            True,
+            work_metadata, work_info_set, work_indptr,
+            reduce_indptr, reduce_final_map, reduce_partial_map,
+            page_size=page_size,
+            kv_granularity=kv_granularity,
+            max_seqlen_qo=1,
+            uni_seqlen_qo=1,
+            fast_mode=False,
+            max_split_per_batch=NUM_KV_SPLITS,
+            intra_batch_mode=True,
+            dtype_q=torch.bfloat16,
+            dtype_kv=torch.bfloat16,
+        )
+        meta = {
+            "work_meta_data": work_metadata,
+            "work_indptr": work_indptr,
+            "work_info_set": work_info_set,
+            "reduce_indptr": reduce_indptr,
+            "reduce_final_map": reduce_final_map,
+            "reduce_partial_map": reduce_partial_map,
+        }
+        cached = (meta, kv_indices, kv_last_page_len, kv_indptr_use, page_size, o)
     _cache[key] = cached
     return cached
 

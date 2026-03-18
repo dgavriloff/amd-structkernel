@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v336: Retile the split-K=7 branch to a `16x128` reduction with waves=2.
+v304: Stage a power-of-two split-K=4 on the repaired BSK=256 path.
 
-Keep the coarser `16x128` reduce stage fixed, but restore the higher explicit
-large-K occupancy hint to complete the local sweep on this lower-grid-overhead
-configuration.
+Keep the stronger `8x32` reduction geometry, but replace the awkward
+split-K=7 main-kernel shape with a real power-of-two split-K=4 so the gluon
+reduction no longer carries a masked odd partial.
 """
 import torch
 import triton
@@ -42,7 +42,7 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Keep the coarser 16x128 branch and restore the higher waves hint.
+        # Stage a power-of-two split count on the repaired BSK=256 path.
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -53,7 +53,7 @@ def _get_fused_config(M, N, K):
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
-            "NUM_KSPLIT": 7,
+            "NUM_KSPLIT": 4,
         }
     if M <= 4:
         return {
@@ -243,9 +243,9 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
     # Pre-allocate y_pp
     y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=device)
 
-    # Reduce kernel params — coarser retile to cut reduce-grid size again
-    REDUCE_BSM = 16
-    REDUCE_BSN = 128
+    # Reduce kernel params — gluon version uses BSN=64 for fp32 partials
+    REDUCE_BSM = 8
+    REDUCE_BSN = 32  # Keep the strongest benchmarked reduction tile
     ACTUAL_KSPLIT = triton.cdiv(K_kernel, (SPLITK_BLOCK_SIZE // 2))
     reduce_grid = (triton.cdiv(M, REDUCE_BSM), triton.cdiv(N, REDUCE_BSN))
 

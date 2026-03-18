@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v336: Retile the split-K=7 branch to a `16x128` reduction with waves=2.
+v317: Move the full-hints split-K branch to a `16x32` reduction tile with waves=1.
 
-Keep the coarser `16x128` reduce stage fixed, but restore the higher explicit
-large-K occupancy hint to complete the local sweep on this lower-grid-overhead
-configuration.
+Start from the current best benchmarked split-K=7 `4x32` reduction path, keep
+the full quant-kernel hint set, and switch to the milder `16x32` reduction
+geometry while using the lower large-K occupancy hint.
 """
 import torch
 import triton
@@ -42,7 +42,7 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Keep the coarser 16x128 branch and restore the higher waves hint.
+        # Try the milder 16x32 reduction geometry with the lower occupancy hint.
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -50,7 +50,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 2,
+            "waves_per_eu": 1,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 7,
@@ -158,11 +158,20 @@ def _fused_mxfp4_quant_shuffle_kernel(
     stride_x_fp4_m = tl.cast(stride_x_fp4_m_in, tl.int64)
     stride_x_fp4_n = tl.cast(stride_x_fp4_n_in, tl.int64)
 
+    tl.assume(M > 0)
+    tl.assume(N > 0)
+    tl.assume(stride_x_m > 0)
+    tl.assume(stride_x_fp4_m > 0)
+    tl.assume(stride_x_n == 1)
+    tl.assume(stride_x_fp4_n == 1)
+    tl.multiple_of(stride_x_m, MXFP4_QUANT_BLOCK_SIZE)
+    tl.multiple_of(stride_x_fp4_m, MXFP4_QUANT_BLOCK_SIZE // 2)
     NUM_QUANT_BLOCKS: tl.constexpr = BLOCK_SIZE_N // MXFP4_QUANT_BLOCK_SIZE
 
     for pid_n in tl.range(start_n, min(start_n + NUM_ITER, N), num_stages=NUM_STAGES):
         x_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         x_offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        x_offs_n = tl.max_contiguous(x_offs_n, BLOCK_SIZE_N)
         x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
 
         if EVEN_M_N:
@@ -180,6 +189,7 @@ def _fused_mxfp4_quant_shuffle_kernel(
         # Store fp4 output
         out_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         out_offs_n = pid_n * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
+        out_offs_n = tl.max_contiguous(out_offs_n, BLOCK_SIZE_N // 2)
         out_offs = (
             out_offs_m[:, None] * stride_x_fp4_m + out_offs_n[None, :] * stride_x_fp4_n
         )
@@ -243,9 +253,9 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
     # Pre-allocate y_pp
     y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=device)
 
-    # Reduce kernel params — coarser retile to cut reduce-grid size again
+    # Reduce kernel params — keep the narrower width, but restore the row tile
     REDUCE_BSM = 16
-    REDUCE_BSN = 128
+    REDUCE_BSN = 32
     ACTUAL_KSPLIT = triton.cdiv(K_kernel, (SPLITK_BLOCK_SIZE // 2))
     reduce_grid = (triton.cdiv(M, REDUCE_BSM), triton.cdiv(N, REDUCE_BSN))
 

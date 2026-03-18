@@ -2,11 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v336: Retile the split-K=7 branch to a `16x128` reduction with waves=2.
+v334: Retile the split-K=7 branch to a `16x128` reduction with waves=1.
 
-Keep the coarser `16x128` reduce stage fixed, but restore the higher explicit
-large-K occupancy hint to complete the local sweep on this lower-grid-overhead
-configuration.
+The `8x64` family is valid and competitive, but this branch tests whether a
+coarser reduce stage lowers overhead further on the same split-K main kernel.
 """
 import torch
 import triton
@@ -42,7 +41,7 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Keep the coarser 16x128 branch and restore the higher waves hint.
+        # Reuse the valid split-K=7 branch with the lower waves hint.
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -50,7 +49,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 2,
+            "waves_per_eu": 1,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 7,

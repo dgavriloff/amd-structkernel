@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v336: Retile the split-K=7 branch to a `16x128` reduction with waves=2.
+v298: Revisit the strongest split-K=7 `8x32` benchmark branch with exact metadata.
 
-Keep the coarser `16x128` reduce stage fixed, but restore the higher explicit
-large-K occupancy hint to complete the local sweep on this lower-grid-overhead
-configuration.
+Return to the fastest fixed-input `8x32` reduction geometry on the repaired
+`BLOCK_SIZE_K=256` split-K path, while keeping the exact active-partial count
+for the reduction kernel instead of a padded upper bound.
 """
 import torch
 import triton
@@ -42,7 +42,9 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Keep the coarser 16x128 branch and restore the higher waves hint.
+        # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
+        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
+        # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -243,9 +245,9 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
     # Pre-allocate y_pp
     y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=device)
 
-    # Reduce kernel params — coarser retile to cut reduce-grid size again
-    REDUCE_BSM = 16
-    REDUCE_BSN = 128
+    # Reduce kernel params — gluon version uses BSN=64 for fp32 partials
+    REDUCE_BSM = 8
+    REDUCE_BSN = 32  # Fastest fixed-input split-K=7 reduction tile with exact metadata
     ACTUAL_KSPLIT = triton.cdiv(K_kernel, (SPLITK_BLOCK_SIZE // 2))
     reduce_grid = (triton.cdiv(M, REDUCE_BSM), triton.cdiv(N, REDUCE_BSN))
 
@@ -268,7 +270,7 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
         'REDUCE_BSM': REDUCE_BSM,
         'REDUCE_BSN': REDUCE_BSN,
         'ACTUAL_KSPLIT': ACTUAL_KSPLIT,
-        'MAX_KSPLIT': triton.next_power_of_2(NUM_KSPLIT),
+        'MAX_KSPLIT': ACTUAL_KSPLIT,
     }
 
 

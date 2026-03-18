@@ -2,11 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v336: Retile the split-K=7 branch to a `16x128` reduction with waves=2.
+v293: Valid split-K=7 follow-up with an `8x64` gluon reduction retile.
 
-Keep the coarser `16x128` reduce stage fixed, but restore the higher explicit
-large-K occupancy hint to complete the local sweep on this lower-grid-overhead
-configuration.
+Stay on the repaired `BLOCK_SIZE_K=256` split-K path and change only the reduce
+tile width from `32` back to `64` while keeping the smaller row tile.
 """
 import torch
 import triton
@@ -42,7 +41,7 @@ def _get_fused_config(M, N, K):
     All configs use BSK=256 num_stages=2 for Triton software pipelining.
     """
     if K > 4096:
-        # Keep the coarser 16x128 branch and restore the higher waves hint.
+        # Return to the strongest valid split-K shape: split-K=7 with BSK=256.
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -158,11 +157,15 @@ def _fused_mxfp4_quant_shuffle_kernel(
     stride_x_fp4_m = tl.cast(stride_x_fp4_m_in, tl.int64)
     stride_x_fp4_n = tl.cast(stride_x_fp4_n_in, tl.int64)
 
+    tl.multiple_of(stride_x_m, MXFP4_QUANT_BLOCK_SIZE)
+    tl.multiple_of(stride_x_fp4_m, MXFP4_QUANT_BLOCK_SIZE // 2)
+
     NUM_QUANT_BLOCKS: tl.constexpr = BLOCK_SIZE_N // MXFP4_QUANT_BLOCK_SIZE
 
     for pid_n in tl.range(start_n, min(start_n + NUM_ITER, N), num_stages=NUM_STAGES):
         x_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
         x_offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        x_offs_n = tl.max_contiguous(x_offs_n, BLOCK_SIZE_N)
         x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
 
         if EVEN_M_N:
@@ -243,9 +246,9 @@ def _prepare_splitk_dispatch(M, N, K, config, device):
     # Pre-allocate y_pp
     y_pp = torch.empty((NUM_KSPLIT, M, N), dtype=torch.float32, device=device)
 
-    # Reduce kernel params — coarser retile to cut reduce-grid size again
-    REDUCE_BSM = 16
-    REDUCE_BSN = 128
+    # Reduce kernel params — gluon version uses BSN=64 for fp32 partials
+    REDUCE_BSM = 8
+    REDUCE_BSN = 64  # Valid split-K=7 neighbor to compare against the 8x32 winner
     ACTUAL_KSPLIT = triton.cdiv(K_kernel, (SPLITK_BLOCK_SIZE // 2))
     reduce_grid = (triton.cdiv(M, REDUCE_BSM), triton.cdiv(N, REDUCE_BSN))
 

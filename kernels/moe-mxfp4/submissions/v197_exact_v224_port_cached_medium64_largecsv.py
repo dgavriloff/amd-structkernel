@@ -2,17 +2,18 @@
 #!POPCORN gpu MI355X
 
 """
-v203: Cached medium-auto / large-k3 control for the E257 branch family.
+v197: Exact sibling-v224-style port for the remaining credible E257 branch.
 
 Policy:
-- E=257, M<=128: CK Tile with BYPASS_TUNE_CONFIG=1 and KSPLIT=7
-- E=257, M>128: CK Tile with BYPASS_TUNE_CONFIG=1, KSPLIT=3, block_size_M=32
+- E=257, M<=128: CK Tile with BYPASS_TUNE_CONFIG=1, KSPLIT=7, block_size_M=64
+- E=257, M>128: CSV/default CK path
 - E=33, M<=16: CK Tile with KSPLIT=7
 - E=33, 16<M<=128: CK Tile with KSPLIT=2 and block_size_M=32
 - E=33, M>128: default path with block_size_M=64 and Swiglu for d<=512
 
-This completes the matrix by combining the medium-auto E257 path with the
-large-E257 ksplit=3 branch.
+This restores the cached sorting/stage1 hooks and OPUS env var while keeping
+the sibling v224 shape split, so it is the exact later evidence-backed variant
+rather than the cleaned-up hybrids tested as v194-v196.
 """
 import gc
 import os
@@ -178,7 +179,7 @@ def custom_kernel(data: input_t) -> output_t:
     if E > 64 and M <= 128:
         mode = "cktile_e257_k7"
     elif E > 64:
-        mode = "cktile_e257_k3"
+        mode = "e257_csv"
     elif E <= 64 and M <= 16:
         mode = "cktile_k7"
     elif E <= 64 and M <= 128:
@@ -190,9 +191,9 @@ def custom_kernel(data: input_t) -> output_t:
         if mode == "cktile_e257_k7":
             os.environ["AITER_KSPLIT"] = "7"
             os.environ["AITER_BYPASS_TUNE_CONFIG"] = "1"
-        elif mode == "cktile_e257_k3":
-            os.environ["AITER_KSPLIT"] = "3"
-            os.environ["AITER_BYPASS_TUNE_CONFIG"] = "1"
+        elif mode == "e257_csv":
+            os.environ.pop("AITER_KSPLIT", None)
+            os.environ.pop("AITER_BYPASS_TUNE_CONFIG", None)
         elif mode == "cktile_k7":
             os.environ["AITER_KSPLIT"] = "7"
             os.environ.pop("AITER_BYPASS_TUNE_CONFIG", None)
@@ -209,8 +210,8 @@ def custom_kernel(data: input_t) -> output_t:
         bsm = 64
     elif mode == "cktile_k2":
         bsm = 32
-    elif mode == "cktile_e257_k3":
-        bsm = 32
+    elif mode == "cktile_e257_k7":
+        bsm = 64
     else:
         bsm = None
 

@@ -51,6 +51,9 @@ def main():
     snapshot_file = sys.argv[8] if len(sys.argv) > 8 else None
 
     result = sys.stdin.read()
+    state_dir = os.path.dirname(session_file)
+    log_file = os.path.join(state_dir, f'submit_v{version}_{mode}.log')
+    log_hint = f' Full server output: {log_file}'
     rate_limit_match = re.search(
         r'Rate limit exceeded:\s*(\d+)/(\d+)\s+(\w+)\s+submissions per hour\. Try again in\s+(\d+)s',
         result,
@@ -65,7 +68,7 @@ def main():
             print(f'[SUBMIT RESULT] v{version} test BLOCKED ({kind} quota, retry in {wait_s}s)')
         else:
             test_result = 'pass' if re.search(r'pass', result, re.IGNORECASE) else 'fail'
-            print(f'[SUBMIT RESULT] v{version} test {test_result.upper()}')
+            print(f'[SUBMIT RESULT] v{version} test {test_result.upper()}.{log_hint}')
         log_event(session_file, {
             'action': 'submit', 'mode': 'test', 'v': version,
             'result': test_result, 'ts': ts()
@@ -76,6 +79,8 @@ def main():
             kind = rate_limit_match.group(3).lower()
             wait_s = int(rate_limit_match.group(4))
             print(f'[SUBMIT RESULT] v{version} benchmark BLOCKED ({kind} quota, retry in {wait_s}s)')
+        elif re.search(r'❌', result):
+            print(f'[SUBMIT RESULT] v{version} benchmark FAIL (testing failed on server — code is broken, fix before resubmitting).{log_hint}')
         else:
             score = geomean_from_text(result)
             if score:
@@ -83,9 +88,9 @@ def main():
                 log_event(bm_file, {
                     'v': version, 'score': score, 'session': session_id, 'ts': ts()
                 })
-                print(f'[SUBMIT RESULT] v{version} benchmark geomean={score:.2f}µs (BM only — not comparable to LB scores. Only compare BM to BM.)')
+                print(f'[SUBMIT RESULT] v{version} benchmark geomean={score:.2f}µs (BM only — not comparable to LB scores. Only compare BM to BM.).{log_hint}')
             else:
-                print(f'[SUBMIT RESULT] v{version} benchmark completed (could not parse geomean)')
+                print(f'[SUBMIT RESULT] v{version} benchmark FAIL (no timing data returned — check server output).{log_hint}')
 
     elif mode == 'leaderboard':
         if rate_limit_match:
@@ -93,8 +98,8 @@ def main():
             wait_s = int(rate_limit_match.group(4))
             print(f'[SUBMIT RESULT] v{version} leaderboard BLOCKED ({kind} quota, retry in {wait_s}s)')
             return
-        # Reject if server reports test failure
-        if re.search(r'❌ Testing failed', result):
+        # Reject if server reports test failure (catches both "❌ Testing failed" and "❌ ... failed testing:")
+        if re.search(r'❌', result):
             log_event(session_file, {
                 'action': 'submit', 'mode': 'leaderboard', 'v': version,
                 'score': None, 'best': None, 'kept': False,
@@ -102,7 +107,7 @@ def main():
             })
             subprocess.run(['cp', os.path.join(kernel_dir, 'best_submission.py'),
                           os.path.join(kernel_dir, 'submission.py')])
-            print(f'[SUBMIT RESULT] v{version} leaderboard REVERT (testing failed on server)')
+            print(f'[SUBMIT RESULT] v{version} leaderboard REVERT (testing failed on server).{log_hint}')
             return
 
         score = geomean_from_text(result, ranked_only=True)
@@ -115,7 +120,7 @@ def main():
             })
             subprocess.run(['cp', os.path.join(kernel_dir, 'best_submission.py'),
                           os.path.join(kernel_dir, 'submission.py')])
-            print(f'[SUBMIT RESULT] v{version} leaderboard REVERT (could not parse score)')
+            print(f'[SUBMIT RESULT] v{version} leaderboard REVERT (could not parse score).{log_hint}')
             return
 
         best = json.load(open(best_file))
@@ -164,7 +169,7 @@ def main():
 
         # Print result message
         if improved:
-            print(f'[SUBMIT RESULT] v{version} leaderboard KEEP {score:.2f}µs ({change} vs v{best_version} @ {best_score}µs)')
+            print(f'[SUBMIT RESULT] v{version} leaderboard KEEP {score:.2f}µs ({change} vs v{best_version} @ {best_score}µs).{log_hint}')
         else:
             revert_count = 0
             with open(session_file) as f:
@@ -172,7 +177,7 @@ def main():
                     e = json.loads(line)
                     if e.get('action') == 'submit' and e.get('mode') == 'leaderboard' and e.get('kept') is False:
                         revert_count += 1
-            msg = f'[SUBMIT RESULT] v{version} leaderboard REVERT {score:.2f}µs ({change} vs v{best_version} @ {best_score}µs) [{revert_count}/5 reverts]'
+            msg = f'[SUBMIT RESULT] v{version} leaderboard REVERT {score:.2f}µs ({change} vs v{best_version} @ {best_score}µs) [{revert_count}/5 reverts].{log_hint}'
             if revert_count >= 5:
                 msg += ' — REVERT LIMIT REACHED. Run: ./tools/close_branch.sh --what-failed "summary" && exit'
             print(msg)

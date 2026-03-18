@@ -2,8 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v173: Revert the bs=64 8k kv_granularity tweak and keep only the non-fast metadata planner.
-This drops the benchmark-broken shape-specific metadata override while preserving the recovered routing:
+v170: Recover the true v089 hybrid aiter baseline and keep the parser-safe preamble.
+This restores the last known-good routing while preserving leaderboard parser stability:
 - bf16 non-persistent for bs<=4,kv<=1024
 - bf16 persistent page_size=64 for all kv>=4096
 - a16w8 persistent elsewhere
@@ -82,7 +82,7 @@ def _build_persistent_meta(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr
 
     info = get_mla_metadata_info_v1(
         batch_size, 1, NUM_HEADS, dtype_q, dtype_kv,
-        is_sparse=False, fast_mode=False,
+        is_sparse=False, fast_mode=True,
         num_kv_splits=NUM_KV_SPLITS, intra_batch_mode=True,
     )
     work = [torch.empty(s, dtype=t, device="cuda") for s, t in info]
@@ -100,7 +100,7 @@ def _build_persistent_meta(batch_size, kv_seq_len, q_total, qo_indptr, kv_indptr
         kv_granularity=max(page_size, 16),
         max_seqlen_qo=1,
         uni_seqlen_qo=1,
-        fast_mode=False,
+        fast_mode=True,
         max_split_per_batch=NUM_KV_SPLITS,
         intra_batch_mode=True,
         dtype_q=dtype_q,

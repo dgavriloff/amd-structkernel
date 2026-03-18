@@ -2,17 +2,17 @@
 #!POPCORN gpu MI355X
 
 """
-v203: Cached medium-auto / large-k3 control for the E257 branch family.
+v200: Exact sibling e257_ksweep analogue.
 
 Policy:
 - E=257, M<=128: CK Tile with BYPASS_TUNE_CONFIG=1 and KSPLIT=7
-- E=257, M>128: CK Tile with BYPASS_TUNE_CONFIG=1, KSPLIT=3, block_size_M=32
+- E=257, M>128: CK Tile with BYPASS_TUNE_CONFIG=1, KSPLIT=2, block_size_M=32
 - E=33, M<=16: CK Tile with KSPLIT=7
 - E=33, 16<M<=128: CK Tile with KSPLIT=2 and block_size_M=32
 - E=33, M>128: default path with block_size_M=64 and Swiglu for d<=512
 
-This completes the matrix by combining the medium-auto E257 path with the
-large-E257 ksplit=3 branch.
+This matches the sibling e257_ksweep branch exactly by leaving the medium E257
+path on auto block_size_M while sweeping large-E257 to ksplit=2.
 """
 import gc
 import os
@@ -178,7 +178,7 @@ def custom_kernel(data: input_t) -> output_t:
     if E > 64 and M <= 128:
         mode = "cktile_e257_k7"
     elif E > 64:
-        mode = "cktile_e257_k3"
+        mode = "cktile_e257_k2"
     elif E <= 64 and M <= 16:
         mode = "cktile_k7"
     elif E <= 64 and M <= 128:
@@ -190,8 +190,8 @@ def custom_kernel(data: input_t) -> output_t:
         if mode == "cktile_e257_k7":
             os.environ["AITER_KSPLIT"] = "7"
             os.environ["AITER_BYPASS_TUNE_CONFIG"] = "1"
-        elif mode == "cktile_e257_k3":
-            os.environ["AITER_KSPLIT"] = "3"
+        elif mode == "cktile_e257_k2":
+            os.environ["AITER_KSPLIT"] = "2"
             os.environ["AITER_BYPASS_TUNE_CONFIG"] = "1"
         elif mode == "cktile_k7":
             os.environ["AITER_KSPLIT"] = "7"
@@ -209,7 +209,7 @@ def custom_kernel(data: input_t) -> output_t:
         bsm = 64
     elif mode == "cktile_k2":
         bsm = 32
-    elif mode == "cktile_e257_k3":
+    elif mode == "cktile_e257_k2":
         bsm = 32
     else:
         bsm = None

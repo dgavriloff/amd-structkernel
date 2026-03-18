@@ -2,8 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v173: Revert the bs=64 8k kv_granularity tweak and keep only the non-fast metadata planner.
-This drops the benchmark-broken shape-specific metadata override while preserving the recovered routing:
+v171: Keep the recovered hybrid routing but switch persistent metadata to non-fast mode.
+This isolates the metadata planner while preserving the same kernel routing and parser preamble:
 - bf16 non-persistent for bs<=4,kv<=1024
 - bf16 persistent page_size=64 for all kv>=4096
 - a16w8 persistent elsewhere
