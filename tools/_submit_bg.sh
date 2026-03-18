@@ -29,7 +29,9 @@ if [ -n "$MESSAGE" ] && tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
     # If revert limit reached, interrupt current turn first so the agent processes it immediately
     if echo "$MESSAGE" | grep -q "REVERT LIMIT REACHED"; then
         tmux send-keys -t "$TMUX_SESSION" Escape
-        sleep 2
+        sleep 3
+        tmux send-keys -t "$TMUX_SESSION" Enter
+        sleep 1
     fi
     tmux send-keys -t "$TMUX_SESSION" "$MESSAGE" Enter Enter
 fi
