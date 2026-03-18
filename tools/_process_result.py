@@ -79,6 +79,10 @@ def main():
         else:
             score = geomean_from_text(result)
             if score:
+                bm_file = os.path.join(os.path.dirname(session_file), '..', 'benchmarks.jsonl')
+                log_event(bm_file, {
+                    'v': version, 'score': score, 'session': session_id, 'ts': ts()
+                })
                 print(f'[SUBMIT RESULT] v{version} benchmark geomean={score:.2f}µs (BM only — not comparable to LB scores. Only compare BM to BM.)')
             else:
                 print(f'[SUBMIT RESULT] v{version} benchmark completed (could not parse geomean)')

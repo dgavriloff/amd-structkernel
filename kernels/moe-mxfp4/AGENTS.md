@@ -32,6 +32,7 @@
 
 ## Rules
 - Never edit files in `state/`. The tools do that.
+- Before submitting a benchmark, check `state/benchmarks.jsonl` to see if this version was already benchmarked. Don't waste quota on repeats.
 - submit.sh rejects without a registered proposal.
 - Read source code of the component you plan to change before implementing.
 - Clone repos to `reference/cloned-repos/`. Check what's already cloned first.
