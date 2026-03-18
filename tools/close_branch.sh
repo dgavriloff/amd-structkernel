@@ -79,3 +79,10 @@ echo "Summary: $WHAT_FAILED"
 
 # Auto-commit
 cd "$KERNEL_DIR" && git add -A && git commit -m "session ${SESSION_ID}: closed — ${WHAT_FAILED}"
+
+# Kill own Codex session — send /exit then exit to ensure tmux session dies
+KERNEL=$(basename "$KERNEL_DIR")
+TMUX_SESSION="codex-${KERNEL}-${SESSION_ID}"
+if tmux has-session -t "$TMUX_SESSION" 2>/dev/null; then
+    tmux send-keys -t "$TMUX_SESSION" /exit Enter Enter exit Enter Enter &
+fi
