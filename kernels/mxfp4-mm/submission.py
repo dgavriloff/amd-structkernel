@@ -2,11 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v211: M<=32 K<=1024 cache_modifier=None (from .cg).
+v219: .wt on M=256 scale stores (from .cg).
 
-For K=512 BSM=8 BSN=128 BSK=256, B data per block is 32KB FP4.
-Without .cg, L1 caching improves latency for 2 K-iterations.
-AMD library default uses null for this config.
+M=256: .wt bypasses L1 write-allocate for scale stores, pushing data
+to L2 faster for ASM GEMM consumption. 25+ BM confirmations at -2 to -4%.
 """
 import torch
 import triton
@@ -225,7 +224,7 @@ def _fused_mxfp4_quant_shuffle_kernel(
             bs_ptr + bs_offs,
             bs_e8m0.to(tl.uint8),
             mask=bs_mask,
-            cache_modifier=".cg",
+            cache_modifier=".wt",
         )
 
 
