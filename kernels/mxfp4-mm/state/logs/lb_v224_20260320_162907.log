@@ -1,0 +1,150 @@
+Submitting to leaderboard: amd-mxfp4-mm
+GPU: MI355X
+Mode: leaderboard
+File: best_submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+{"status": "processing", "elapsed_time": 15.0}
+{"status": "processing", "elapsed_time": 30.01}
+{"status": "processing", "elapsed_time": 45.01}
+{"status": "processing", "elapsed_time": 60.01}
+{"status": "processing", "elapsed_time": 75.01}
+{"status": "processing", "elapsed_time": 90.01}
+{"status": "processing", "elapsed_time": 105.01}
+{"status": "processing", "elapsed_time": 120.01}
+{"status": "processing", "elapsed_time": 135.01}
+{"status": "processing", "elapsed_time": 150.92}
+{"status": "processing", "elapsed_time": 165.92}
+{"status": "processing", "elapsed_time": 181.03}
+{"status": "processing", "elapsed_time": 196.03}
+{"status": "processing", "elapsed_time": 211.03}
+{"status": "processing", "elapsed_time": 226.03}
+{"status": "processing", "elapsed_time": 241.04}
+{"status": "processing", "elapsed_time": 256.04}
+{"status": "processing", "elapsed_time": 271.42}
+{"status": "processing", "elapsed_time": 286.42}
+STDOUT (Run 1):
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/f4gemm/f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128.co GetFunction: _ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128E
+[aiter] hipModuleGetFunction: _ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128E Success
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/f4gemm/f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128.co GetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E
+[aiter] hipModuleGetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E Success
+
+STDERR (Run 1):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_gemm_common] under /home/runner/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:4, N:2880, K:512, not found tuned config in CKGEMM or asmGEMM, will use default config!
+[aiter] import [module_gemm_a4w4_asm] under /home/runner/aiter/aiter/jit/module_gemm_a4w4_asm.so
+[aiter] type hints mismatch, override to --> gemm_a4w4_asm(A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor, out: torch.Tensor, kernelName: str, bias: Optional[torch.Tensor] = None, alpha: float | Optional[typing.SupportsIndex] = 1.0, beta: float | Optional[typing.SupportsIndex] = 0.0, bpreshuffle: Optional[bool] = True, log2_k_split: int | Optional[typing.SupportsIndex] = None) -> torch.Tensor
+[aiter] shape is M:16, N:2112, K:7168, not found tuned config in CKGEMM or asmGEMM, will use default config!
+[aiter] shape is M:32, N:4096, K:512, not found tuned config in CKGEMM or asmGEMM, will use default config!
+[aiter] shape is M:32, N:2880, K:512, not found tuned config in CKGEMM or asmGEMM, will use default config!
+
+STDOUT (Run 2):
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/f4gemm/f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128.co GetFunction: _ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128E
+[aiter] hipModuleGetFunction: _ZN5aiter42f4gemm_bf16_per1x32Fp4_BpreShuffle_192x128E Success
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/f4gemm/f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128.co GetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E
+[aiter] hipModuleGetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E Success
+
+STDERR (Run 2):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_gemm_common] under /home/runner/aiter/aiter/jit/module_gemm_common.so
+[aiter] type hints mismatch, override to --> get_padded_m(M: int | typing.SupportsIndex, N: int | typing.SupportsIndex, K: int | typing.SupportsIndex, gl: int | typing.SupportsIndex) -> int
+[aiter] shape is M:4, N:2880, K:512, not found tuned config in CKGEMM or asmGEMM, will use default config!
+[aiter] import [module_gemm_a4w4_asm] under /home/runner/aiter/aiter/jit/module_gemm_a4w4_asm.so
+[aiter] type hints mismatch, override to --> gemm_a4w4_asm(A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor, out: torch.Tensor, kernelName: str, bias: Optional[torch.Tensor] = None, alpha: float | Optional[typing.SupportsIndex] = 1.0, beta: float | Optional[typing.SupportsIndex] = 0.0, bpreshuffle: Optional[bool] = True, log2_k_split: int | Optional[typing.SupportsIndex] = None) -> torch.Tensor
+[aiter] shape is M:16, N:2112, K:7168, not found tuned config in CKGEMM or asmGEMM, will use default config!
+[aiter] shape is M:32, N:4096, K:512, not found tuned config in CKGEMM or asmGEMM, will use default config!
+[aiter] shape is M:32, N:2880, K:512, not found tuned config in CKGEMM or asmGEMM, will use default config!
+
+
+"**MI355X on GitHub ✅ success**
+> Workflow [23352191751](<https://github.com/gpu-mode/kernelbot/actions/runs/23352191751>) completed
+> Downloading artifacts... done
+> ✅ Testing successful
+> ✅ Benchmarking successful
+> ✅ Leaderboard run successful
+
+Running on:
+* GPU: `AMD Instinct MI355X`
+* CPU: `AMD EPYC 9575F 64-Core Processor`
+* Device count: `1`
+* Runtime: `ROCm`
+* Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
+* Torch: `2.10.0+rocm7.1`
+* Hostname: `arc-runner-set-h82gb-runner-hjn5s`
+
+
+## ✅ Passed 4/4 tests:
+```
+✅ k: 7168; m: 8; n: 2112; seed: 124
+> Maximum error: 0.0
+✅ k: 1536; m: 16; n: 3072; seed: 6635
+> Maximum error: 0.0
+✅ k: 1536; m: 64; n: 3072; seed: 45
+> Maximum error: 0.0
+✅ k: 512; m: 256; n: 2880; seed: 78
+> Maximum error: 0.0```
+
+## Benchmarks:
+```
+k: 512; m: 4; n: 2880; seed: 4565
+ ⏱ 6.18 ± 0.017 µs
+ ⚡ 5.88 µs 🐌 10.4 µs
+
+k: 7168; m: 16; n: 2112; seed: 15
+ ⏱ 11.1 ± 0.02 µs
+ ⚡ 10.2 µs 🐌 16.6 µs
+
+k: 512; m: 32; n: 4096; seed: 457
+ ⏱ 6.24 ± 0.017 µs
+ ⚡ 5.92 µs 🐌 11.3 µs
+
+k: 512; m: 32; n: 2880; seed: 54
+ ⏱ 6.25 ± 0.018 µs
+ ⚡ 5.96 µs 🐌 10.9 µs
+
+k: 2048; m: 64; n: 7168; seed: 687
+ ⏱ 13.3 ± 0.02 µs
+ ⚡ 12.6 µs 🐌 17.9 µs
+
+k: 1536; m: 256; n: 3072; seed: 7856
+ ⏱ 12.2 ± 0.02 µs
+ ⚡ 11.7 µs 🐌 16.7 µs
+```
+
+## Ranked Benchmark:
+```
+k: 512; m: 4; n: 2880; seed: 4565
+ ⏱ 6.44 ± 0.069 µs
+ ⚡ 6.04 µs 🐌 9.92 µs
+
+k: 7168; m: 16; n: 2112; seed: 15
+ ⏱ 11.5 ± 0.04 µs
+ ⚡ 10.9 µs 🐌 14.0 µs
+
+k: 512; m: 32; n: 4096; seed: 457
+ ⏱ 6.62 ± 0.047 µs
+ ⚡ 6.20 µs 🐌 10.3 µs
+
+k: 512; m: 32; n: 2880; seed: 54
+ ⏱ 6.37 ± 0.023 µs
+ ⚡ 6.08 µs 🐌 8.00 µs
+
+k: 2048; m: 64; n: 7168; seed: 687
+ ⏱ 13.6 ± 0.04 µs
+ ⚡ 13.0 µs 🐌 15.6 µs
+
+k: 1536; m: 256; n: 3072; seed: 7856
+ ⏱ 13.0 ± 0.04 µs
+ ⚡ 12.2 µs 🐌 15.7 µs
+```","**MI355X on GitHub (secret) ✅ success**
+> Workflow [23352191958](<https://github.com/gpu-mode/kernelbot/actions/runs/23352191958>) completed
+> Downloading artifacts... done
+> ✅ Testing successful
+> ✅ Benchmarking successful
+> ✅ Leaderboard run successful
+"

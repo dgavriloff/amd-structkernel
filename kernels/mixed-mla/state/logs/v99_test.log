@@ -1,0 +1,122 @@
+Submitting to leaderboard: amd-mixed-mla
+GPU: MI355X
+Mode: test
+File: submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+{"status": "processing", "elapsed_time": 15.0}
+{"status": "processing", "elapsed_time": 30.0}
+{"status": "processing", "elapsed_time": 45.24}
+{"status": "processing", "elapsed_time": 60.24}
+{"status": "processing", "elapsed_time": 75.24}
+{"status": "processing", "elapsed_time": 90.24}
+{"status": "processing", "elapsed_time": 105.25}
+{"status": "processing", "elapsed_time": 120.64}
+{"status": "processing", "elapsed_time": 135.64}
+{"status": "processing", "elapsed_time": 150.64}
+{"status": "processing", "elapsed_time": 166.55}
+{"status": "processing", "elapsed_time": 181.55}
+{"status": "processing", "elapsed_time": 196.71}
+{"status": "processing", "elapsed_time": 211.71}
+{"status": "processing", "elapsed_time": 226.71}
+{"status": "processing", "elapsed_time": 241.71}
+{"status": "processing", "elapsed_time": 256.76}
+{"status": "processing", "elapsed_time": 271.76}
+{"status": "processing", "elapsed_time": 286.76}
+{"status": "processing", "elapsed_time": 301.77}
+{"status": "processing", "elapsed_time": 316.77}
+{"status": "processing", "elapsed_time": 331.77}
+{"status": "processing", "elapsed_time": 346.77}
+{"status": "processing", "elapsed_time": 361.77}
+{"status": "processing", "elapsed_time": 376.77}
+{"status": "processing", "elapsed_time": 392.7}
+{"status": "processing", "elapsed_time": 407.7}
+STDOUT (Run 1):
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16_ps.co GetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE
+[aiter] hipModuleGetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE Success
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16.co GetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E
+[aiter] hipModuleGetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E Success
+
+STDERR (Run 1):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] start build [module_quant] under /home/runner/aiter/aiter/jit/build/module_quant
+[aiter] [32mfinish build [module_quant], cost 26.6s [0m
+[aiter] import [module_quant] under /home/runner/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+[aiter] start build [module_mla_metadata] under /home/runner/aiter/aiter/jit/build/module_mla_metadata
+[aiter] [32mfinish build [module_mla_metadata], cost 28.9s [0m
+[aiter] import [module_mla_metadata] under /home/runner/aiter/aiter/jit/module_mla_metadata.so
+[aiter] type hints mismatch, override to --> get_mla_metadata_v1(seqlens_qo_indptr: torch.Tensor, seqlens_kv_indptr: torch.Tensor, kv_last_page_lens: torch.Tensor, num_heads_per_head_k: int | typing.SupportsIndex, num_heads_k: int | typing.SupportsIndex, is_causal: bool, work_metadata_ptrs: torch.Tensor, work_info_set: torch.Tensor, work_indptr: torch.Tensor, reduce_indptr: torch.Tensor, reduce_final_map: torch.Tensor, reduce_partial_map: torch.Tensor, page_size: int | typing.SupportsIndex = 1, kv_granularity: int | typing.SupportsIndex = 16, max_seqlen_qo: int | typing.SupportsIndex = -1, uni_seqlen_qo: int | typing.SupportsIndex = -1, fast_mode: bool = True, topk: int | typing.SupportsIndex = -1, max_split_per_batch: int | typing.SupportsIndex = -1, intra_batch_mode: bool = False, dtype_q: Optional[torch.dtype] = None, dtype_kv: Optional[torch.dtype] = None) -> None
+[aiter] start build [module_mla_asm] under /home/runner/aiter/aiter/jit/build/module_mla_asm
+/home/runner/aiter/hsa/codegen.py:13: Pandas4Warning: 'future.no_silent_downcasting' is deprecated, please refrain from using it.
+  pd.set_option("future.no_silent_downcasting", True)
+/home/runner/aiter/hsa/codegen.py:86: Pandas4Warning: The copy keyword is deprecated and will be removed in a future version. Copy-on-Write is active in pandas since 3.0 which utilizes a lazy copy mechanism that defers copies until necessary. Use .copy() to make an eager copy if necessary.
+  pd.concat(dfs, ignore_index=True).fillna(0).infer_objects(copy=False)
+[aiter] [32mfinish build [module_mla_asm], cost 20.7s [0m
+[aiter] import [module_mla_asm] under /home/runner/aiter/aiter/jit/module_mla_asm.so
+[aiter] type hints mismatch, override to --> mla_decode_stage1_asm_fwd(Q: torch.Tensor, KV: torch.Tensor, qo_indptr: torch.Tensor, kv_indptr: torch.Tensor, kv_page_indices: torch.Tensor, kv_last_page_lens: torch.Tensor, num_kv_splits_indptr: Optional[torch.Tensor], work_meta_data: Optional[torch.Tensor], work_indptr: Optional[torch.Tensor], work_info_set: Optional[torch.Tensor], max_seqlen_q: int | typing.SupportsIndex, page_size: int | typing.SupportsIndex, nhead_kv: int | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, splitData: torch.Tensor, splitLse: torch.Tensor, output: torch.Tensor, q_scale: Optional[torch.Tensor] = None, kv_scale: Optional[torch.Tensor] = None) -> None
+[aiter] start build [module_mla_reduce] under /home/runner/aiter/aiter/jit/build/module_mla_reduce
+[aiter] [32mfinish build [module_mla_reduce], cost 170.8s [0m
+[aiter] import [module_mla_reduce] under /home/runner/aiter/aiter/jit/module_mla_reduce.so
+[aiter] type hints mismatch, override to --> mla_reduce_v1(partial_output: torch.Tensor, partial_lse: torch.Tensor, reduce_indptr: torch.Tensor, reduce_final_map: Optional[torch.Tensor], reduce_partial_map: torch.Tensor, max_seqlen_q: int | typing.SupportsIndex, final_output: torch.Tensor, final_lse: Optional[torch.Tensor] = None) -> None
+
+
+"**MI355X on GitHub ✅ success**
+> Workflow [23352848970](<https://github.com/gpu-mode/kernelbot/actions/runs/23352848970>) completed
+> Downloading artifacts... done
+> ✅ Testing successful
+
+Running on:
+* GPU: `AMD Instinct MI355X`
+* CPU: `AMD EPYC 9575F 64-Core Processor`
+* Device count: `1`
+* Runtime: `ROCm`
+* Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
+* Torch: `2.10.0+rocm7.1`
+* Hostname: `arc-runner-set-h82gb-runner-rd4hv`
+
+
+## ✅ Passed 4/4 tests:
+```
+✅ seed: 4220; qseqlen: 1; kvseqlen: 1024; batchsize: 4
+> Maximum error: 0.01708984375
+✅ seed: 5412; qseqlen: 1; kvseqlen: 1024; batchsize: 32
+> Maximum error: 0.017822265625
+✅ seed: 1360; qseqlen: 1; kvseqlen: 8192; batchsize: 64
+> Maximum error: 0.0166015625
+✅ seed: 9826; qseqlen: 1; kvseqlen: 8192; batchsize: 256
+> Maximum error: 0.017578125```
+
+## Program stderr:
+```
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] start build [module_quant] under /home/runner/aiter/aiter/jit/build/module_quant
+[aiter] \u001b[32mfinish build [module_quant], cost 26.6s \u001b[0m
+[aiter] import [module_quant] under /home/runner/aiter/aiter/jit/module_quant.so
+[aiter] type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
+[aiter] start build [module_mla_metadata] under /home/runner/aiter/aiter/jit/build/module_mla_metadata
+[aiter] \u001b[32mfinish build [module_mla_metadata], cost 28.9s \u001b[0m
+[aiter] import [module_mla_metadata] under /home/runner/aiter/aiter/jit/module_mla_metadata.so
+[aiter] type hints mismatch, override to --> get_mla_metadata_v1(seqlens_qo_indptr: torch.Tensor, seqlens_kv_indptr: torch.Tensor, kv_last_page_lens: torch.Tensor, num_heads_per_head_k: int | typing.SupportsIndex, num_heads_k: int | typing.SupportsIndex, is_causal: bool, work_metadata_ptrs: torch.Tensor, work_info_set: torch.Tensor, work_indptr: torch.Tensor, reduce_indptr: torch.Tensor, reduce_final_map: torch.Tensor, reduce_partial_map: torch.Tensor, page_size: int | typing.SupportsIndex = 1, kv_granularity: int | typing.SupportsIndex = 16, max_seqlen_qo: int | typing.SupportsIndex = -1, uni_seqlen_qo: int | typing.SupportsIndex = -1, fast_mode: bool = True, topk: int | typing.SupportsIndex = -1, max_split_per_batch: int | typing.SupportsIndex = -1, intra_batch_mode: bool = False, dtype_q: Optional[torch.dtype] = None, dtype_kv: Optional[torch.dtype] = None) -> None
+[aiter] start build [module_mla_asm] under /home/runner/aiter/aiter/jit/build/module_mla_asm
+/home/runner/aiter/hsa/codegen.py:13: Pandas4Warning: 'future.no_silent_downcasting' is deprecated, please refrain from using it.
+  pd.set_option(\"future.no_silent_downcasting\", True)
+/home/runner/aiter/hsa/codegen.py:86: Pandas4Warning: The copy keyword is deprecated and will be removed in a future version. Copy-on-Write is active in pandas since 3.0 which utilizes a lazy copy mechanism that defers copies until necessary. Use .copy() to make an eager copy if necessary.
+  pd.concat(dfs, ignore_index=True).fillna(0).infer_objects(copy=False)
+[aiter] \u001b[32mfinish build [module_mla_asm], cost 20.7s \u001b[0m
+[aiter] import [module_mla_asm] under /home/runner/aiter/aiter/jit/module_mla_asm.so
+[aiter] type hints mismatch, override to --> mla_decode_stage1_asm_fwd(Q: torch.Tensor, KV: torch.Tensor, qo_indptr: torch.Tensor, kv_indptr: torch.Tensor, kv_page_indices: torch.Tensor, kv_last_page_lens: torch.Tensor, num_kv_splits_indptr: Optional[torch.Tensor], work_meta_data: Optional[torch.Tensor], work_indptr: Optional[torch.Tensor], work_info_set: Optional[torch.Tensor], max_seqlen_q: int | typing.SupportsIndex, page_size: int | typing.SupportsIndex, nhead_kv: int | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, splitData: torch.Tensor, splitLse: torch.Tensor, output: torch.Tensor, q_scale: Optional[torch.Tensor] = None, kv_scale: Optional[torch.Tensor] = None) -> None
+[aiter] start build [module_mla_reduce] under /home/runner/aiter/aiter/jit/build/module_mla_reduce
+[aiter] \u001b[32mfinish build [module_mla_reduce], cost 170.8s \u001b[0m
+[aiter] import [module_mla_reduce] under /home/runner/aiter/aiter/jit/module_mla_reduce.so
+[aiter] type hints mismatch, override to --> mla_reduce_v1(partial_output: torch.Tensor, partial_lse: torch.Tensor, reduce_indptr: torch.Tensor, reduce_final_map: Optional[torch.Tensor], reduce_partial_map: torch.Tensor, max_seqlen_q: int | typing.SupportsIndex, final_output: torch.Tensor, final_lse: Optional[torch.Tensor] = None) -> None```
+
+## Program stdout:
+```
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16_ps.co GetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE
+[aiter] hipModuleGetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE Success
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16.co GetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E
+[aiter] hipModuleGetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E Success```"

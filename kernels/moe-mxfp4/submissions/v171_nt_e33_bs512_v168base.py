@@ -2,9 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v172: Use heuristic stage1 kernel (256x64x64x128_2x2) for E=33/bs=128/d=512
-instead of forced 256x128x128x128_1x4. Heuristic picks 2Mx2N wave config
-with matched MPerBlock=64 for block_m=64.
+v171: Enable NT loads for bs=512/E=33/d=512 and d=2048 on v168 base.
+NT loads stream weights without L2 pollution. For bs=512/E=33 shapes,
+each expert gets ~15.5 tokens, weight matrices are read once per block.
 """
 import os
 import functools
@@ -67,18 +67,20 @@ _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
 }
 _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
     "block_m": 64, "ksplit": 0,
-    "kernelName1": "", "kernelName2": _FLYDSL_STAGE2_M16_K128,  # v172: heuristic stage1 (2x2 wave)
+    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
     "run_1stage": False,
 }
 _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
     "block_m": 64, "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
     "run_1stage": False,
+    "use_non_temporal_load": True,
 }
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 64, "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
     "run_1stage": False,
+    "use_non_temporal_load": True,
 }
 
 # E=257 shapes

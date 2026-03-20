@@ -2,18 +2,16 @@
 #!POPCORN gpu MI355X
 
 """
-v099: Remove CUDA graphs and Q quantization caching to fix LB correctness.
+v098: Fix correctness with pre-allocated fp8 Q buffers, quantize outside graph.
 
-v096 used CUDA graphs which replay a fixed execution plan. The LB uses
-recheck=True (new random data each iteration, seed += 13), so CUDA graph
-replay produces stale/wrong results. All kv=8192 shapes failed with
-thousands of mismatched elements.
-
-Also removes quantize_fp8_cached which cached based on data_ptr — stale
-when new data is written to the same allocation.
-
-Keeps: fp8 for all shapes, non-persistent (splits=1) vs persistent
-(splits>1) split logic, per-shape split tuning.
+Key changes over v096:
+1. Pre-allocate fp8 Q and scale buffers with fixed pointers (per shape).
+2. Quantize Q into pre-allocated buffers BEFORE graph replay using
+   dynamic_per_tensor_quant (in-place). This ensures fresh quantization
+   each call without stale cache issues.
+3. CUDA graph captures fixed buffer pointers, so replay reads freshly
+   quantized data. Graph does NOT include quantization step.
+4. fp8 path for all shapes.
 
 WARNING: page_size=1 EVERYWHERE.
 """
@@ -25,6 +23,10 @@ from aiter import dtypes as aiter_dtypes
 from aiter import get_mla_metadata_info_v1, get_mla_metadata_v1
 from aiter import mla_decode_stage1_asm_fwd, mla_reduce_v1
 from aiter.mla import mla_decode_fwd
+try:
+    from aiter.ops.quant import dynamic_per_tensor_quant
+except ImportError:
+    dynamic_per_tensor_quant = None
 try:
     from aiter import per_tensor_quant_hip
 except ImportError:
@@ -44,18 +46,6 @@ SM_SCALE = 1.0 / (QK_HEAD_DIM ** 0.5)
 MI355X_CU_COUNT = 256
 
 _cache = {}
-
-
-def quantize_fp8(tensor: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Quantize bf16 tensor to fp8 with per-tensor scale."""
-    if per_tensor_quant_hip is not None:
-        fp8_tensor, scale = per_tensor_quant_hip(tensor, quant_dtype=FP8_DTYPE)
-        return fp8_tensor, scale.reshape(1)
-    finfo = torch.finfo(FP8_DTYPE)
-    amax = tensor.abs().amax().clamp(min=1e-12)
-    scale = amax / finfo.max
-    fp8_tensor = (tensor / scale).clamp(min=finfo.min, max=finfo.max).to(FP8_DTYPE)
-    return fp8_tensor, scale.to(torch.float32).reshape(1)
 
 
 def _choose_num_kv_splits(batch_size, kv_seq_len):
@@ -117,6 +107,10 @@ def _build_meta_persistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr
     split_lse = torch.empty((num_partials * q_seq_len, 1, NUM_HEADS, 1), dtype=torch.float32, device="cuda")
     output = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
 
+    # Pre-allocate fp8 Q buffers with fixed pointers
+    q_fp8 = torch.empty((q_total, NUM_HEADS, QK_HEAD_DIM), dtype=FP8_DTYPE, device="cuda")
+    q_scale = torch.empty(1, dtype=torch.float32, device="cuda")
+
     return {
         "work_meta_data": work_metadata, "work_indptr": work_indptr,
         "work_info_set": work_info_set, "reduce_indptr": reduce_indptr,
@@ -124,6 +118,7 @@ def _build_meta_persistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr
         "split_data": split_data, "split_lse": split_lse, "output": output,
         "kv_indices": kv_indices, "kv_last_page_len": kv_last_page_len,
         "kv_indptr_use": kv_indptr_use,
+        "q_fp8": q_fp8, "q_scale": q_scale,
     }
 
 
@@ -135,9 +130,14 @@ def _build_meta_nonpersistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_ind
     num_kv_splits_indptr = torch.arange(0, (batch_size + 1) * num_kv_splits, num_kv_splits, dtype=torch.int32, device="cuda")
     output = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
 
+    # Pre-allocate fp8 Q buffers with fixed pointers
+    q_fp8 = torch.empty((q_total, NUM_HEADS, QK_HEAD_DIM), dtype=FP8_DTYPE, device="cuda")
+    q_scale = torch.empty(1, dtype=torch.float32, device="cuda")
+
     return {
         "kv_indices": kv_indices, "kv_last_page_len": kv_last_page_len,
         "num_kv_splits_indptr": num_kv_splits_indptr, "output": output,
+        "q_fp8": q_fp8, "q_scale": q_scale,
     }
 
 
@@ -149,6 +149,21 @@ def _get_cached(key, build_fn, *args, **kwargs):
     return cached
 
 
+# CUDA graph cache: key -> (graph, output, q_fp8, q_scale)
+_graph_cache = {}
+
+
+def _quantize_q_inplace(q_reshaped, q_fp8, q_scale):
+    """Quantize Q into pre-allocated fp8 buffer in-place."""
+    if dynamic_per_tensor_quant is not None:
+        dynamic_per_tensor_quant(q_fp8, q_reshaped, q_scale)
+    else:
+        finfo = torch.finfo(FP8_DTYPE)
+        amax = q_reshaped.abs().amax().clamp(min=1e-12)
+        q_scale.fill_(amax / finfo.max)
+        q_fp8.copy_((q_reshaped / q_scale).clamp(min=finfo.min, max=finfo.max).to(FP8_DTYPE))
+
+
 def custom_kernel(data: input_t) -> output_t:
     q, kv_data, qo_indptr, kv_indptr, config = data
 
@@ -157,9 +172,9 @@ def custom_kernel(data: input_t) -> output_t:
     q_seq_len = config.get("q_seq_len", 1)
     q_total = q.shape[0]
 
-    # FP8 path for all shapes — no CUDA graphs, fresh quantization every call
+    # FP8 path for all shapes
     kv_buffer_fp8, kv_scale = kv_data["fp8"]
-    q_fp8, q_scale = quantize_fp8(q.view(-1, NUM_HEADS, QK_HEAD_DIM))
+    q_reshaped = q.view(-1, NUM_HEADS, QK_HEAD_DIM)
     num_splits = _choose_num_kv_splits(batch_size, kv_seq_len)
 
     if num_splits == 1:
@@ -170,9 +185,22 @@ def custom_kernel(data: input_t) -> output_t:
             batch_size, q_seq_len, kv_seq_len, q_total,
             qo_indptr, kv_indptr, num_splits,
         )
+        q_fp8 = cached["q_fp8"]
+        q_scale = cached["q_scale"]
+
+        # Always quantize Q fresh into pre-allocated buffer
+        _quantize_q_inplace(q_reshaped, q_fp8, q_scale)
+
+        graph_key = ('fp8_np', batch_size, kv_seq_len, q.data_ptr(), kv_buffer_fp8.data_ptr())
+        if graph_key in _graph_cache:
+            graph, output = _graph_cache[graph_key]
+            graph.replay()
+            return output
+
         kv_buffer_4d = kv_buffer_fp8.view(-1, 1, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
         output = cached["output"]
 
+        # Warmup
         mla_decode_fwd(
             q_fp8, kv_buffer_4d, output,
             qo_indptr, kv_indptr,
@@ -184,6 +212,25 @@ def custom_kernel(data: input_t) -> output_t:
             q_scale=q_scale, kv_scale=kv_scale,
             intra_batch_mode=False,
         )
+        torch.cuda.synchronize()
+
+        # Capture graph (attention only, Q already quantized)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            mla_decode_fwd(
+                q_fp8, kv_buffer_4d, output,
+                qo_indptr, kv_indptr,
+                cached["kv_indices"], cached["kv_last_page_len"],
+                q_seq_len,
+                page_size=1, nhead_kv=NUM_KV_HEADS, sm_scale=SM_SCALE,
+                num_kv_splits=num_splits,
+                num_kv_splits_indptr=cached["num_kv_splits_indptr"],
+                q_scale=q_scale, kv_scale=kv_scale,
+                intra_batch_mode=False,
+            )
+
+        _graph_cache[graph_key] = (graph, output)
+        graph.replay()
         return output
 
     else:
@@ -194,8 +241,21 @@ def custom_kernel(data: input_t) -> output_t:
             batch_size, q_seq_len, kv_seq_len, q_total,
             qo_indptr, kv_indptr, FP8_DTYPE, FP8_DTYPE, num_splits,
         )
+        q_fp8 = cached["q_fp8"]
+        q_scale = cached["q_scale"]
+
+        # Always quantize Q fresh into pre-allocated buffer
+        _quantize_q_inplace(q_reshaped, q_fp8, q_scale)
+
+        graph_key = ('fp8_ps', batch_size, kv_seq_len, q.data_ptr(), kv_buffer_fp8.data_ptr())
+        if graph_key in _graph_cache:
+            graph, output = _graph_cache[graph_key]
+            graph.replay()
+            return output
+
         kv_buffer_4d = kv_buffer_fp8.view(-1, 1, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
 
+        # Warmup
         mla_decode_stage1_asm_fwd(
             q_fp8, kv_buffer_4d, qo_indptr,
             cached["kv_indptr_use"], cached["kv_indices"], cached["kv_last_page_len"],
@@ -209,4 +269,25 @@ def custom_kernel(data: input_t) -> output_t:
             cached["reduce_indptr"], cached["reduce_final_map"], cached["reduce_partial_map"],
             q_seq_len, cached["output"], None,
         )
+        torch.cuda.synchronize()
+
+        # Capture graph (stage1+reduce only, Q already quantized)
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            mla_decode_stage1_asm_fwd(
+                q_fp8, kv_buffer_4d, qo_indptr,
+                cached["kv_indptr_use"], cached["kv_indices"], cached["kv_last_page_len"],
+                None, cached["work_meta_data"], cached["work_indptr"], cached["work_info_set"],
+                q_seq_len, 1, NUM_KV_HEADS, SM_SCALE,
+                cached["split_data"], cached["split_lse"], cached["output"],
+                q_scale, kv_scale,
+            )
+            mla_reduce_v1(
+                cached["split_data"], cached["split_lse"],
+                cached["reduce_indptr"], cached["reduce_final_map"], cached["reduce_partial_map"],
+                q_seq_len, cached["output"], None,
+            )
+
+        _graph_cache[graph_key] = (graph, cached["output"])
+        graph.replay()
         return cached["output"]
