@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v224: Unify M<=32 K>1024 with K<=1024 config: BSM=8 BSN=128 BSK=256
-NW=4 NS=2 cache=None waves=2. Eliminates BSM=32 BSN=64 BSK=512 NW=8
-NS=1 special case. 2x more blocks (128 vs 64 for M=32 N=4096 K=4096).
-v209 tried .cg (not None). cache=None allows L1 B-tile reuse.
+v211: M<=32 K<=1024 cache_modifier=None (from .cg).
+
+For K=512 BSM=8 BSN=128 BSK=256, B data per block is 32KB FP4.
+Without .cg, L1 caching improves latency for 2 K-iterations.
+AMD library default uses null for this config.
 """
 import torch
 import triton
@@ -82,10 +83,7 @@ def _get_fused_config(M, N, K):
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
         }
-    elif M <= 32:
-        # Unified config for all M<=32 shapes (K<=1024 and K>1024)
-        # BSM=8 gives 4 M-tiles for M=32, BSN=128 for wide N coverage
-        # cache=None allows L1 caching of B tiles across K-iterations
+    elif M <= 32 and K <= 1024:
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -93,6 +91,19 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
+            "waves_per_eu": 2,
+            "matrix_instr_nonkdim": 16,
+            "cache_modifier": None,
+            "NUM_KSPLIT": 1,
+        }
+    elif M <= 32:
+        return {
+            "BLOCK_SIZE_M": 32,
+            "BLOCK_SIZE_N": 64,
+            "BLOCK_SIZE_K": 512,
+            "GROUP_SIZE_M": 1,
+            "num_warps": 8,
+            "num_stages": 1,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": None,
@@ -111,7 +122,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": None,
+            "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
         }
 
@@ -214,7 +225,7 @@ def _fused_mxfp4_quant_shuffle_kernel(
             bs_ptr + bs_offs,
             bs_e8m0.to(tl.uint8),
             mask=bs_mask,
-            cache_modifier=".wt",
+            cache_modifier=".cg",
         )
 
 
