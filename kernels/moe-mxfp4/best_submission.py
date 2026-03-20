@@ -2,28 +2,29 @@
 #!POPCORN gpu MI355X
 
 """
-v165: Pre-allocate moe_sorting + intermediate buffers per shape.
-Bypass fused_moe wrapper, call low-level aiter ops directly with
-pre-allocated tensors to eliminate torch.empty allocation overhead.
+v166: Full inline 2-stage pipeline with all buffers pre-allocated.
+Bypass fused_moe and fused_moe_2stages entirely. Pre-allocate
+moe_sorting buffers, a2 intermediate, and call stage kernels directly.
 """
 import os
 import functools
 import torch
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 from task import input_t, output_t
 
 import aiter
 from aiter import ActivationType, QuantType, dtypes
 from aiter.fused_moe import (
-    moe_sorting, get_2stage_cfgs, get_padded_M, get_inter_dim,
-    fused_moe_2stages, ck_moe_stage1,
+    get_2stage_cfgs, get_padded_M, get_inter_dim,
+    ck_moe_stage1, cktile_moe_stage1, cktile_moe_stage2,
+    _flydsl_stage2_wrapper,
 )
 import aiter.fused_moe as _fused_moe_module
 import aiter.ops.flydsl.moe_kernels as _flydsl_moe_kernels
 from aiter.ops.triton.quant.fused_mxfp4_quant import fused_dynamic_mxfp4_quant_moe_sort
 from aiter.utility import fp4_utils
 
-# Register FlyDSL tile_k=128 kernels that aren't in server's default registration
+# Register FlyDSL tile_k=128 kernels
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"] = {
     "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
     "tile_m": 32, "tile_n": 128, "tile_k": 128, "mode": "atomic", "MPerBlock": 32,
@@ -41,7 +42,7 @@ _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomi
     "tile_m": 16, "tile_n": 128, "tile_k": 128, "mode": "atomic", "MPerBlock": 16,
 }
 
-# Inject ksplit=2 configs for shapes that benefit from cktile_moe path
+# Shape configs
 _CUSTOM_CONFIGS = {}
 
 def _make_key(token, inter_dim, expert):
@@ -52,24 +53,32 @@ def _make_key(token, inter_dim, expert):
         "QuantType.per_1x32", True, False,
     )
 
-# === E=33 shapes ===
+_4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
+_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
+_FLYDSL_STAGE2_M16_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
+
+# E=33 shapes
 _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
     "block_m": 32, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
 }
-
-_4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
-_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
-_FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
-
 _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
     "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
+    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "run_1stage": False,
+}
+_CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
+    "block_m": 64, "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "run_1stage": False,
+}
+_CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
+    "block_m": 64, "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
     "run_1stage": False,
 }
 
-# === E=257 shapes ===
+# E=257 shapes
 _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
     "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
@@ -78,37 +87,19 @@ _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
     "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
 }
-
-# === bs=512 shapes ===
-_CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
-    "run_1stage": False,
-}
-_CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
-    "run_1stage": False,
-}
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "block_m": 32, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M32,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
+    "kernelName1": _4WG_STAGE1_M32, "kernelName2": _FLYDSL_STAGE2_M16_K128,
     "run_1stage": False,
     "use_non_temporal_load": True,
 }
 
-# Pre-allocated buffer cache: shape_key -> dict of pre-allocated tensors
+# Pre-allocated buffer cache
 _buffer_cache = {}
 
-def _get_shape_key(M, E, topk, model_dim, inter_dim, block_size_M):
-    return (M, E, topk, model_dim, inter_dim, block_size_M)
-
-def _get_or_alloc_buffers(M, E, topk, model_dim, inter_dim, block_size_M, device):
-    """Get pre-allocated buffers for the given shape, allocating on first call."""
-    key = _get_shape_key(M, E, topk, model_dim, inter_dim, block_size_M)
+def _get_or_alloc_sorting_buffers(M, E, topk, model_dim, block_size_M, device):
+    """Pre-allocate moe_sorting output buffers."""
+    key = ("sort", M, E, topk, model_dim, block_size_M)
     if key in _buffer_cache:
         return _buffer_cache[key]
 
@@ -121,11 +112,18 @@ def _get_or_alloc_buffers(M, E, topk, model_dim, inter_dim, block_size_M, device
         "sorted_expert_ids": torch.empty(max_num_m_blocks, dtype=dtypes.i32, device=device),
         "num_valid_ids": torch.empty(2, dtype=dtypes.i32, device=device),
         "moe_buf": torch.empty((M, model_dim), dtype=torch.bfloat16, device=device),
-        # a2 intermediate buffer for 2-stage path
-        "a2": torch.empty((M, topk, inter_dim), dtype=torch.bfloat16, device=device),
     }
     _buffer_cache[key] = bufs
     return bufs
+
+def _get_or_alloc_a2(M, topk, inter_dim, device):
+    """Pre-allocate a2 intermediate buffer."""
+    key = ("a2", M, topk, inter_dim)
+    if key in _buffer_cache:
+        return _buffer_cache[key]
+    buf = torch.empty((M, topk, inter_dim), dtype=torch.bfloat16, device=device)
+    _buffer_cache[key] = buf
+    return buf
 
 
 _injected = False
@@ -169,7 +167,6 @@ def _inject_configs():
             dtype, q_dtype_a, q_dtype_w, q_type, use_g1u1,
             activation, doweight_stage1, hidden_pad, intermediate_pad, is_shuffled,
         )
-
         from aiter.jit.utils.chip_info import get_cu_num
         cu_num = get_cu_num()
         keys = (
@@ -212,34 +209,6 @@ def _inject_configs():
     _fused_moe_module.get_2stage_cfgs = _patched_get_2stage_cfgs
 
 
-def _fast_moe_sorting(topk_ids, topk_weights, num_experts, model_dim, block_size, device):
-    """Call moe_sorting with pre-allocated buffers to avoid per-call allocation."""
-    M, topk = topk_ids.shape
-    bufs = _get_or_alloc_buffers(M, num_experts, topk, model_dim, model_dim, block_size, device)
-
-    sorted_ids = bufs["sorted_ids"]
-    sorted_weights = bufs["sorted_weights"]
-    sorted_expert_ids = bufs["sorted_expert_ids"]
-    num_valid_ids = bufs["num_valid_ids"]
-    moe_buf = bufs["moe_buf"]
-
-    aiter.moe_sorting_fwd(
-        topk_ids,
-        topk_weights,
-        sorted_ids,
-        sorted_weights,
-        sorted_expert_ids,
-        num_valid_ids,
-        moe_buf,
-        num_experts,
-        int(block_size),
-        None,  # expert_mask
-        None,  # num_local_tokens
-        0,     # dispatch_policy
-    )
-    return sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf
-
-
 def custom_kernel(data: input_t) -> output_t:
     (
         hidden_states, gate_up_weight, down_weight,
@@ -256,9 +225,10 @@ def custom_kernel(data: input_t) -> output_t:
 
     M = hidden_states.shape[0]
     topk = topk_ids.shape[1]
-    E, model_dim, inter_dim = get_inter_dim(
-        gate_up_weight_shuffled.shape, down_weight_shuffled.shape
-    )
+    device = topk_ids.device
+    w1 = gate_up_weight_shuffled
+    w2 = down_weight_shuffled
+    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     padded_M = get_padded_M(M)
     metadata = get_2stage_cfgs(
@@ -270,33 +240,99 @@ def custom_kernel(data: input_t) -> output_t:
 
     block_size_M = int(metadata.block_m)
 
-    # Use pre-allocated buffers for moe_sorting
-    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_out = \
-        _fast_moe_sorting(topk_ids, topk_weights, E, model_dim, block_size_M, topk_ids.device)
+    # === Pre-allocated moe_sorting ===
+    bufs = _get_or_alloc_sorting_buffers(M, E, topk, model_dim, block_size_M, device)
+    sorted_ids = bufs["sorted_ids"]
+    sorted_weights = bufs["sorted_weights"]
+    sorted_expert_ids = bufs["sorted_expert_ids"]
+    num_valid_ids = bufs["num_valid_ids"]
+    moe_out = bufs["moe_buf"]
 
-    # Now run the 2-stage pipeline using the standard fused_moe_2stages
-    # which handles quantization + stage1 + re-quant + stage2
-    return fused_moe_2stages(
-        hidden_states,
-        gate_up_weight_shuffled,
-        down_weight_shuffled,
-        topk,
-        sorted_ids,
-        sorted_weights,
-        sorted_expert_ids,
-        num_valid_ids,
-        moe_out,
-        True,  # isG1U1
-        block_size_M,
-        activation=ActivationType.Silu,
-        quant_type=QuantType.per_1x32,
-        doweight_stage1=False,
-        q_dtype_a=dtypes.fp4x2,
-        q_dtype_w=dtypes.fp4x2,
-        w1_scale=gate_up_weight_scale_shuffled,
-        w2_scale=down_weight_scale_shuffled,
-        a1_scale=None,
-        a2_scale=None,
-        hidden_pad=hidden_pad,
-        intermediate_pad=intermediate_pad,
+    aiter.moe_sorting_fwd(
+        topk_ids, topk_weights,
+        sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_out,
+        E, int(block_size_M), None, None, 0,
     )
+
+    # === Inline 2-stage pipeline ===
+    token_num = M
+
+    if metadata.ksplit > 1:
+        # cktile_moe path: bf16 activations, no fp4 quant
+        a1 = hidden_states.to(torch.bfloat16)
+        a1_scale = None
+        w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
+        w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
+
+        a2 = metadata.stage1(
+            a1, w1, w2,
+            sorted_ids, sorted_expert_ids, num_valid_ids,
+            _get_or_alloc_a2(M, topk, inter_dim, device),  # pre-allocated
+            topk,
+            block_m=block_size_M,
+            a1_scale=a1_scale,
+            w1_scale=w1_scale_view,
+            sorted_weights=None,
+        )
+
+        # cktile_moe stage2: a2 is bf16, no inter-stage requant
+        a2_scale = None
+        metadata.stage2(
+            a2, w1, w2,
+            sorted_ids, sorted_expert_ids, num_valid_ids,
+            moe_out, topk,
+            w2_scale=w2_scale_view,
+            a2_scale=a2_scale,
+            block_m=block_size_M,
+            sorted_weights=sorted_weights,
+        )
+    else:
+        # CK 2-stage path: fp4 activation quant
+        w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
+        w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
+
+        # Stage 1: quant activations + gate_up GEMM + SwiGLU
+        a1, a1_scale = fused_dynamic_mxfp4_quant_moe_sort(
+            hidden_states,
+            sorted_ids=sorted_ids,
+            num_valid_ids=num_valid_ids,
+            token_num=token_num,
+            topk=1,
+            block_size=block_size_M,
+        )
+
+        a2 = _get_or_alloc_a2(M, topk, inter_dim, device)
+        a2 = metadata.stage1(
+            a1, w1, w2,
+            sorted_ids, sorted_expert_ids, num_valid_ids,
+            a2, topk,
+            block_m=block_size_M,
+            a1_scale=a1_scale,
+            w1_scale=w1_scale_view,
+            sorted_weights=None,
+        )
+
+        # Inter-stage requant: bf16 -> fp4
+        a2_flat = a2.view(-1, inter_dim)
+        a2_quant, a2_scale = fused_dynamic_mxfp4_quant_moe_sort(
+            a2_flat,
+            sorted_ids=sorted_ids,
+            num_valid_ids=num_valid_ids,
+            token_num=token_num,
+            topk=topk,
+            block_size=block_size_M,
+        )
+        a2_quant = a2_quant.view(token_num, topk, -1)
+
+        # Stage 2: down GEMM + weighted reduction
+        metadata.stage2(
+            a2_quant, w1, w2,
+            sorted_ids, sorted_expert_ids, num_valid_ids,
+            moe_out, topk,
+            w2_scale=w2_scale_view,
+            a2_scale=a2_scale,
+            block_m=block_size_M,
+            sorted_weights=sorted_weights,
+        )
+
+    return moe_out
