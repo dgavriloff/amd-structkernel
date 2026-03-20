@@ -65,7 +65,6 @@
 {"v": 74, "what": "block_m=32 auto-select stage1 + FlyDSL stage2 for d=2048", "keywords": ["block-size", "flydsl", "stage1", "stage2"], "score": 400.0, "kept": false, "reason": "much worse"}
 {"v": 75, "what": "4-WG CK stage2 (256x32x128x128_1x4_v3) for bs512/E257/d=256", "keywords": ["4-wg", "ck", "stage2"], "score": null, "kept": false, "reason": "FAIL"}
 {"v": 76, "what": "block_m=32 + 4-WG stage1 (256x32x128x128_1x4) + FlyDSL for d=512", "keywords": ["4-wg", "block-size", "flydsl", "stage1"], "score": 173.0, "kept": false, "reason": "much worse"}
-{"v": 77, "what": "CUDA graph capture for entire fused_moe pipeline", "keywords": ["cuda-graph", "fused"], "score": null, "kept": false, "reason": "FAIL"}
 {"v": 78, "what": "Force persist_m=4 for FlyDSL stage2", "keywords": ["flydsl", "stage2"], "score": null, "kept": false, "reason": "crash"}
 {"v": 79, "what": "FlyDSL stage2 t128x128x256_atomic for d=2048", "keywords": ["atomic", "flydsl", "stage2"], "score": null, "kept": false, "reason": "crash"}
 {"v": 81, "what": "FlyDSL afp8 stage2 for d=2048 (cheaper fp8 inter-stage quant)", "keywords": ["flydsl", "fp8", "quant", "stage2"], "score": 301.0, "kept": false, "reason": "noise"}
