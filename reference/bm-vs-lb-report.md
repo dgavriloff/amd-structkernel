@@ -109,60 +109,18 @@ Highest percentage gap. These are the fastest kernels (~6µs) so fixed overheads
 
 ## Pre-Submission Checklist
 
-Before proposing a change, walk through this checklist. If any answer is YES, your change will likely fail or regress on LB even if BM improves.
+Answer NO to all of these or your change will fail/regress on LB:
 
-### Correctness (will it FAIL LB?)
+### Will it break?
+- [ ] Any tensor written to by the kernel cached across calls? (output buffers, intermediates)
+- [ ] CUDA graphs?
+- [ ] Caching anything derived from input data (not shape/config)?
+- [ ] Mutating input tensors in-place?
 
-- [ ] **Does `custom_kernel()` write into any tensor allocated outside the function call?**
-  Global/module-level `torch.empty()`, `_cache[key] = torch.empty(...)`, etc. The ASM kernel's direct-write path leaves stale data in reused buffers when inputs change. Allocate output and intermediate buffers fresh every call.
+### Will it regress?
+- [ ] Improvement depends on same data running repeatedly? (cache warmth, TLB, allocator patterns)
+- [ ] Big BM win (>5%) only on small shapes (<20µs)? Likely cache effects that vanish on LB.
+- [ ] Relies on 100ms warmup? LB gets 10ms.
 
-- [ ] **Does the code use CUDA graphs?**
-  `torch.cuda.CUDAGraph`, `graph.capture()`, `graph.replay()`. Graphs replay a fixed execution plan — they cannot handle new input data. This is the #1 confirmed failure mode.
-
-- [ ] **Does the code cache anything derived from input DATA (not just shape/config)?**
-  Quantized Q tensors, sorted indices from routing, pre-computed attention masks. These change when `generate_input()` runs with a new seed. Shape-derived constants (kv_indices from indptr, metadata from batch_size/kv_seq_len) are safe IF the kernel doesn't write to them.
-
-- [ ] **Does the code assume specific seed values or data distributions?**
-  Hard-coded thresholds, branch decisions based on input magnitudes, sparse optimizations that assume certain patterns. LB seeds are secret and data is random.
-
-- [ ] **Does the code modify input tensors in-place?**
-  `check_implementation()` compares the original input against reference. If you mutate the input, the correctness check sees corrupted data. The eval harness passes `_clone_data(data)` to the kernel, but if your kernel stores references to sub-tensors and mutates them, clones won't help.
-
-### Performance (will it REGRESS on LB?)
-
-- [ ] **Does the optimization rely on the same input running repeatedly?**
-  Branch prediction warming, TLB entry stabilization, memory allocator reuse patterns. These all reset when `generate_input()` allocates new tensors with new layouts on each LB iteration.
-
-- [ ] **Does the optimization depend on L2 cache being warm?**
-  If you reorganized data access to improve cache hit rates for a SPECIFIC data layout, new random data on each iteration will have different access patterns. The improvement vanishes.
-
-- [ ] **Is the kernel faster primarily on its first or second call?**
-  Triton JIT compilation happens on first call. `@triton.autotune` runs all configs on first call. LB warmup is 10ms (vs BM's 100ms). If your kernel takes >10ms total to warm up across all shapes, LB timing includes partially-cold runs.
-
-- [ ] **Did BM improve by more than 5% but only on small shapes (<20µs)?**
-  Small shapes are most affected by cache warmth and fixed overheads. A 10% BM win on a 6µs shape might be entirely from cache effects that disappear on LB.
-
-- [ ] **Does the code allocate large temporary buffers that persist?**
-  Even if you're not caching output, large persistent allocations fragment GPU memory. On BM with fixed inputs, the allocator stabilizes. On LB with new inputs each iteration, fragmentation increases, potentially slowing allocation and causing page faults.
-
-### Harness-Specific Traps
-
-- [ ] **Are you optimizing for BM's specific test ordering?**
-  BM runs shapes in a fixed order (as listed in the test file). If your code specializes for "shape X always follows shape Y" (e.g., keeping state from the previous shape), LB also runs the same order but with different data, so ordering assumptions about DATA are broken while ordering assumptions about SHAPES are safe.
-
-- [ ] **Are you exploiting BM's long warmup?**
-  BM warmup runs `tests[0]` for 100 iterations with 100ms budget. If your code does expensive one-time init that's amortized over BM's warmup (e.g., building lookup tables, compiling multiple kernel variants), LB's 10ms warmup may not cover it. The cost shows up in your timed runs.
-
-- [ ] **Are you exploiting the timing window?**
-  The CUDA timing events bracket only `output = custom_kernel(data)` (lines 238-240 of eval.py). Work done BEFORE the call (in module-level code, in `__init__`, at import time) is not timed. This is legitimate — precomputation of constants is fine. But if you move per-call work to import time by assuming fixed inputs, LB will re-generate inputs after your precomputation.
-
-- [ ] **Does your code depend on `del output` (line 248) behavior?**
-  The eval harness deletes the output tensor after each iteration. If your code holds a reference to the same tensor (e.g., returned a cached buffer), `del` won't actually free it. This is fine for correctness but may cause memory pressure on LB where new inputs are allocated each iteration.
-
-### Quick Self-Test
-
-If you can answer YES to all of these, your change is likely LB-safe:
-
-1. If I call `custom_kernel(data)` with completely different random `data` 100 times in a row, will every output be correct?
-2. If I `torch.cuda.empty_cache()` between every call, will the timing be roughly the same?
-3. Does my change improve kernel compute or memory access efficiency, rather than eliminating Python/allocation/sync overhead that only exists on BM?
+### Quick self-test
+Call `custom_kernel()` 100 times with different random data each time. Is every output correct and roughly the same speed?
