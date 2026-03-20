@@ -41,12 +41,23 @@ case "$LEADERBOARD" in
   *) echo "ERROR: Unknown leaderboard '$LEADERBOARD'." >&2; exit 1 ;;
 esac
 
-# --- Read our best score ---
+# --- Read our best BM score ---
 BEST_SCORE=""
 BEST_VERSION=""
 if [[ -f "state/best.json" ]]; then
   BEST_SCORE=$(python3 -c "import json; d=json.load(open('state/best.json')); print(d.get('score',''))" 2>/dev/null || true)
   BEST_VERSION=$(python3 -c "import json; d=json.load(open('state/best.json')); print(d.get('version',''))" 2>/dev/null || true)
+fi
+
+# --- Read our last LB score ---
+KERNEL_NAME=$(basename "$(pwd)")
+REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+LB_FILE="$REPO_DIR/state/last_lb.json"
+LB_SCORE=""
+LB_VERSION=""
+if [[ -f "$LB_FILE" ]]; then
+  LB_SCORE=$(python3 -c "import json; lb=json.load(open('$LB_FILE')); k=lb.get('$KERNEL_NAME',{}); s=k.get('lb_score'); print(s if s is not None else '')" 2>/dev/null || true)
+  LB_VERSION=$(python3 -c "import json; lb=json.load(open('$LB_FILE')); k=lb.get('$KERNEL_NAME',{}); print(k.get('version',''))" 2>/dev/null || true)
 fi
 
 # --- Fetch and parse ---
@@ -59,7 +70,7 @@ if [[ ! -s "$TMPFILE" ]]; then
   exit 1
 fi
 
-export DISPLAY_NAME TOP BEST_SCORE BEST_VERSION TMPFILE
+export DISPLAY_NAME TOP BEST_SCORE BEST_VERSION LB_SCORE LB_VERSION TMPFILE
 python3 << 'PYEOF'
 import sys, json, re, os
 
@@ -129,31 +140,45 @@ for i, entry in enumerate(entries[:top_n]):
 print(f"╚{'═' * 4}╩{'═' * 25}╩{'═' * 14}╩{'═' * 11}╝")
 
 # Compare to our best
-if best_score is not None:
-    leader_score_us = entries[0].get("score", 0) * 1_000_000
-    gap = ((best_score - leader_score_us) / leader_score_us) * 100 if leader_score_us > 0 else 0
+leader_score_us = entries[0].get("score", 0) * 1_000_000
+leader_name = entries[0].get("user_name", "?")
+total = len(entries)
 
+lb_score_str = os.environ.get("LB_SCORE", "")
+lb_version = os.environ.get("LB_VERSION", "")
+lb_score = float(lb_score_str) if lb_score_str else None
+
+print()
+print(f"  ┌─ Your scores ──────────────────────────────")
+if best_score is not None:
+    print(f"  │ Best benchmark (BM): v{best_version} @ {best_score:.3f} µs")
+else:
+    print(f"  │ Best benchmark (BM): none yet")
+if lb_score is not None:
+    print(f"  │ Best leaderboard (LB): v{lb_version} @ {lb_score:.3f} µs")
+else:
+    print(f"  │ Best leaderboard (LB): not yet submitted")
+print(f"  ├─ Competition (LB scores) ──────────────────")
+print(f"  │ #1: {leader_name} @ {leader_score_us:.3f} µs")
+
+# Use LB score for gap if available, otherwise BM
+compare_score = lb_score if lb_score is not None else best_score
+compare_label = "LB" if lb_score is not None else "BM"
+if compare_score is not None:
+    gap = ((compare_score - leader_score_us) / leader_score_us) * 100 if leader_score_us > 0 else 0
     our_rank = 1
-    best_in_seconds = best_score / 1_000_000
+    compare_in_seconds = compare_score / 1_000_000
     for entry in entries:
-        if entry.get("score", 0) < best_in_seconds:
+        if entry.get("score", 0) < compare_in_seconds:
             our_rank += 1
         else:
             break
-    total = len(entries)
-
-    print()
-    print(f"  Your best: v{best_version} @ {best_score:.2f} µs")
-    leader_name = entries[0].get("user_name", "?")
-    print(f"  Leader:    {leader_name} @ {leader_score_us:.2f} µs")
     if gap > 0:
-        print(f"  Gap:       +{gap:.1f}% behind #1")
+        print(f"  │ Gap: +{gap:.1f}% behind #1 (comparing your {compare_label})")
     elif gap < 0:
-        print(f"  Gap:       {gap:.1f}% AHEAD of #1!")
+        print(f"  │ Gap: {gap:.1f}% AHEAD of #1! (comparing your {compare_label})")
     else:
-        print(f"  Gap:       TIED with #1!")
-    print(f"  Est. rank: #{our_rank} of {total}")
-else:
-    print()
-    print("  No local best.json found — run submit.sh leaderboard first.")
+        print(f"  │ Gap: TIED with #1! (comparing your {compare_label})")
+    print(f"  │ Est. rank: #{our_rank} of {total}")
+print(f"  └───────────────────────────────────────────")
 PYEOF
