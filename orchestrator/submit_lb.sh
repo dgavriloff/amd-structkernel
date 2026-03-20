@@ -64,7 +64,7 @@ print(k.get('bm_score', k.get('score', 999999)))
 
     # Check for submission failure — match specific failure patterns, not generic "error"
     # (server STDERR contains "error" in benign aiter log lines)
-    if echo "$RESULT" | grep -qiE "Application error:|Rate limit exceeded|❌ Benchmarking failed|❌ Testing failed|Failed to trigger"; then
+    if echo "$RESULT" | grep -qiE "Application error:|Rate limit exceeded|❌ Benchmarking failed|❌ Testing failed|❌ Leaderboard run failed|Failed to trigger"; then
         echo "[$kernel] LB submission FAILED — will retry next cycle"
         continue
     fi
