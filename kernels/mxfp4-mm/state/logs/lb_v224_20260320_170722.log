@@ -1,0 +1,8 @@
+Submitting to leaderboard: amd-mxfp4-mm
+GPU: MI355X
+Mode: leaderboard
+File: best_submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+Application error: Server processing error: Rate limit exceeded: 1/1 leaderboard submissions per hour. Try again in 1015s. (Status Code: 400)

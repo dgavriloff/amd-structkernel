@@ -2,10 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v168: Pre-allocate quantization output buffers (x_fp4, blockscale_e8m0_sorted)
-for both stage1 and stage2 quant calls. Inline the fused_dynamic_mxfp4_quant_moe_sort
-Triton kernel launch with cached output tensors to eliminate 4 torch.empty allocations
-per forward pass on CK 2-stage shapes.
+v173: Use heuristic stage1 kernel (256x64x64x128_2x2) for E=33/bs=512/d=2048
+instead of forced 256x128x128x128_1x4. Heuristic 2x2 wave layout with 64 N-tiles
+may be better for this large-N (4096) shape on 256 CUs.
 """
 import os
 import functools
@@ -78,7 +77,7 @@ _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
 }
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
     "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "kernelName1": "", "kernelName2": _FLYDSL_STAGE2_M16_K128,  # v173: heuristic stage1 (2x2 wave)
     "run_1stage": False,
 }
 

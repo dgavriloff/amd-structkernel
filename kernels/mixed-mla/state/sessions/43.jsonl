@@ -3,3 +3,5 @@
 {"action": "submit", "mode": "test", "v": 99, "result": "pass", "ts": "2026-03-20T16:47:45.187167+00:00Z"}
 {"action": "submit", "mode": "benchmark", "v": 99, "score": 75.577, "best": 38.256, "kept": false, "ts": "2026-03-20T16:53:58.785928+00:00Z"}
 {"action": "propose", "what": "Call mla_decode_stage1_asm_fwd directly for all shapes, pre-allocate all buffers, skip reduce for splits=1", "why": "mla_decode_fwd creates temporary tensors each call (logits, attn_lse, final_lse). Direct asm call with pre-allocated buffers avoids per-call allocations. For splits=1, output is written directly, skipping reduce.", "keywords": ["direct-asm", "preallocate-all", "skip-reduce-splits1"], "prior_matches": 0, "ts": "2026-03-20T16:57:28.115231+00:00Z"}
+{"action": "submit", "mode": "test", "v": 101, "result": "fail", "ts": "2026-03-20T17:04:46.187185+00:00Z"}
+{"action": "submit", "mode": "test", "v": 101, "result": "pass", "ts": "2026-03-20T17:11:40.828033+00:00Z"}
