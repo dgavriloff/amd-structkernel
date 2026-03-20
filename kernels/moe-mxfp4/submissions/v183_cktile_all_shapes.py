@@ -2,10 +2,8 @@
 #!POPCORN gpu MI355X
 
 """
-v168: Pre-allocate quantization output buffers (x_fp4, blockscale_e8m0_sorted)
-for both stage1 and stage2 quant calls. Inline the fused_dynamic_mxfp4_quant_moe_sort
-Triton kernel launch with cached output tensors to eliminate 4 torch.empty allocations
-per forward pass on CK 2-stage shapes.
+v183: Force cktile ksplit=2 for all 7 shapes, eliminating inter-stage bf16->fp4
+requantization round-trip for the 4 shapes that previously used CK 2-stage path.
 """
 import os
 import functools
@@ -67,18 +65,15 @@ _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
     "run_1stage": False,
 }
 _CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
 }
 _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
 }
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
 }
 
@@ -92,10 +87,8 @@ _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
     "run_1stage": False,
 }
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
-    "block_m": 32, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M32, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
-    "use_non_temporal_load": True,
 }
 
 # Pre-allocated buffer cache

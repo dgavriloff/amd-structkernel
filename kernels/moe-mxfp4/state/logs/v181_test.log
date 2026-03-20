@@ -1,0 +1,239 @@
+Submitting to leaderboard: amd-moe-mxfp4
+GPU: MI355X
+Mode: test
+File: submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+{"status": "processing", "elapsed_time": 15.0}
+{"status": "processing", "elapsed_time": 30.0}
+{"status": "processing", "elapsed_time": 45.0}
+{"status": "processing", "elapsed_time": 60.08}
+{"status": "processing", "elapsed_time": 75.08}
+{"status": "processing", "elapsed_time": 90.08}
+{"status": "processing", "elapsed_time": 105.08}
+{"status": "processing", "elapsed_time": 120.08}
+{"status": "processing", "elapsed_time": 135.09}
+{"status": "processing", "elapsed_time": 150.09}
+{"status": "processing", "elapsed_time": 165.09}
+{"status": "processing", "elapsed_time": 180.09}
+{"status": "processing", "elapsed_time": 195.09}
+{"status": "processing", "elapsed_time": 210.09}
+{"status": "processing", "elapsed_time": 225.1}
+{"status": "processing", "elapsed_time": 240.1}
+{"status": "processing", "elapsed_time": 255.17}
+{"status": "processing", "elapsed_time": 270.17}
+{"status": "processing", "elapsed_time": 285.17}
+STDERR (Run 1):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 0
+[aiter] [fused_moe] using 2stage default for (256, 8, 4096, 1024, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] [32mfinish build [module_moe_sorting], cost 25.0s [0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/scf.py", line 315, in for_
+    yield for_op
+  File "/home/runner/aiter/aiter/ops/flydsl/kernels/mixed_moe_gemm_2stage.py", line 1036, in moe_gemm1
+    acc_gate, acc_up, _ = compute_f8f6f4_tile(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: moe_gemm1.<locals>.compute_f8f6f4_tile() got an unexpected keyword argument 'b_scale'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 157, in _run_single_test
+    submission_output = custom_kernel(_clone_data(data))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/submission.py", line 387, in custom_kernel
+    aiter.ops.flydsl.flydsl_moe_stage1(
+  File "/home/runner/aiter/aiter/ops/flydsl/moe_kernels.py", line 463, in flydsl_moe_stage1
+    tensor_api = _get_compiled_stage1(
+                 ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/aiter/aiter/ops/flydsl/moe_kernels.py", line 223, in _get_compiled_stage1
+    exe = compile_flydsl_moe_stage1(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/aiter/aiter/ops/flydsl/moe_kernels.py", line 124, in compile_flydsl_moe_stage1
+    return compile_mixed_moe_gemm1(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/aiter/aiter/ops/flydsl/kernels/mixed_moe_gemm_2stage.py", line 1394, in compile_mixed_moe_gemm1
+    m = _MOE1()
+        ^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/lang/ir/module.py", line 239, in __init__
+    fn(self)
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/lang/ir/module.py", line 316, in wrapper
+    k = gpu.func(emit=True, lower_range_loops=False)(body_builder)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/func.py", line 250, in <lambda>
+    return lambda realf: decorator(realf, *args, **kwargs)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/gpu.py", line 528, in func
+    func_.emit()
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/func.py", line 398, in emit
+    builder_wrapper(grab_results)
+  File "/usr/local/lib/python3.12/dist-packages/_mlir/extras/meta.py", line 29, in builder_wrapper
+    results = body_builder(*list(op_region.blocks[0].arguments))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/func.py", line 390, in grab_results
+    results = self.body_builder(*args)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/lang/ir/module.py", line 41, in body_builder
+    return f(instance_self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/aiter/aiter/ops/flydsl/kernels/mixed_moe_gemm_2stage.py", line 1027, in moe_gemm1
+    for k_iv in range(arith.index(0), c_k_main2, c2_tile_k):
+  File "/usr/lib/python3.12/contextlib.py", line 158, in __exit__
+    self.gen.throw(value)
+  File "/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/scf.py", line 319, in for_
+    _scf.YieldOp(list(for_op.inner_iter_args))
+  File "/usr/local/lib/python3.12/dist-packages/_mlir/dialects/_scf_ops_gen.py", line 560, in __init__
+    super().__init__(self.OPERATION_NAME, self._ODS_REGIONS, self._ODS_OPERAND_SEGMENTS, self._ODS_RESULT_SEGMENTS, attributes=attributes, results=results, operands=operands, successors=_ods_successors, regions=regions, loc=loc, ip=ip)
+ValueError: Operand 0 of operation "scf.yield" must be a Value (is not a Value)
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 382, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 352, in main
+    return run_testing(logger, pool, tests)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 181, in run_testing
+    good, message = run_single_test(pool, test)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 166, in run_single_test
+    return pool.apply(_run_single_test, (test,))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 360, in apply
+    return self.apply_async(func, args, kwds).get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 774, in get
+    raise self._value
+ValueError: Operand 0 of operation "scf.yield" must be a Value (is not a Value)
+
+
+"**MI355X on GitHub ✅ success**
+> Workflow [23357550155](<https://github.com/gpu-mode/kernelbot/actions/runs/23357550155>) completed
+> Downloading artifacts... done
+> ❌ Running tests failed (internal error 1)
+
+Running on:
+* GPU: `AMD Instinct MI355X`
+* CPU: `AMD EPYC 9575F 64-Core Processor`
+* Device count: `1`
+* Runtime: `ROCm`
+* Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
+* Torch: `2.10.0+rocm7.1`
+* Hostname: `arc-runner-set-h82gb-runner-x6dms`
+# Running failed
+Command ```bash
+python3 eval.py test /tmp/tmpg0p0acwl```
+exited with error code **1** after 32.91 seconds.
+
+## Program stderr:
+```
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 0
+[aiter] [fused_moe] using 2stage default for (256, 8, 4096, 1024, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] \u001b[32mfinish build [module_moe_sorting], cost 25.0s \u001b[0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+multiprocessing.pool.RemoteTraceback: 
+\"\"\"
+Traceback (most recent call last):
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/scf.py\", line 315, in for_
+    yield for_op
+  File \"/home/runner/aiter/aiter/ops/flydsl/kernels/mixed_moe_gemm_2stage.py\", line 1036, in moe_gemm1
+    acc_gate, acc_up, _ = compute_f8f6f4_tile(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+TypeError: moe_gemm1.<locals>.compute_f8f6f4_tile() got an unexpected keyword argument 'b_scale'
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 157, in _run_single_test
+    submission_output = custom_kernel(_clone_data(data))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/submission.py\", line 387, in custom_kernel
+    aiter.ops.flydsl.flydsl_moe_stage1(
+  File \"/home/runner/aiter/aiter/ops/flydsl/moe_kernels.py\", line 463, in flydsl_moe_stage1
+    tensor_api = _get_compiled_stage1(
+                 ^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/aiter/aiter/ops/flydsl/moe_kernels.py\", line 223, in _get_compiled_stage1
+    exe = compile_flydsl_moe_stage1(
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/aiter/aiter/ops/flydsl/moe_kernels.py\", line 124, in compile_flydsl_moe_stage1
+    return compile_mixed_moe_gemm1(
+           ^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/aiter/aiter/ops/flydsl/kernels/mixed_moe_gemm_2stage.py\", line 1394, in compile_mixed_moe_gemm1
+    m = _MOE1()
+        ^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/lang/ir/module.py\", line 239, in __init__
+    fn(self)
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/lang/ir/module.py\", line 316, in wrapper
+    k = gpu.func(emit=True, lower_range_loops=False)(body_builder)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/func.py\", line 250, in <lambda>
+    return lambda realf: decorator(realf, *args, **kwargs)
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/gpu.py\", line 528, in func
+    func_.emit()
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/func.py\", line 398, in emit
+    builder_wrapper(grab_results)
+  File \"/usr/local/lib/python3.12/dist-packages/_mlir/extras/meta.py\", line 29, in builder_wrapper
+    results = body_builder(*list(op_region.blocks[0].arguments))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/func.py\", line 390, in grab_results
+    results = self.body_builder(*args)
+              ^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/lang/ir/module.py\", line 41, in body_builder
+    return f(instance_self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/aiter/aiter/ops/flydsl/kernels/mixed_moe_gemm_2stage.py\", line 1027, in moe_gemm1
+    for k_iv in range(arith.index(0), c_k_main2, c2_tile_k):
+  File \"/usr/lib/python3.12/contextlib.py\", line 158, in __exit__
+    self.gen.throw(value)
+  File \"/usr/local/lib/python3.12/dist-packages/flydsl/dialects/ext/scf.py\", line 319, in for_
+    _scf.YieldOp(list(for_op.inner_iter_args))
+  File \"/usr/local/lib/python3.12/dist-packages/_mlir/dialects/_scf_ops_gen.py\", line 560, in __init__
+    super().__init__(self.OPERATION_NAME, self._ODS_REGIONS, self._ODS_OPERAND_SEGMENTS, self._ODS_RESULT_SEGMENTS, attributes=attributes, results=results, operands=operands, successors=_ods_successors, regions=regions, loc=loc, ip=ip)
+ValueError: Operand 0 of operation \"scf.yield\" must be a Value (is not a Value)
+\"\"\"
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 382, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 352, in main
+    return run_testing(logger, pool, tests)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 181, in run_testing
+    good, message = run_single_test(pool, test)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 166, in run_single_test
+    return pool.apply(_run_single_test, (test,))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 360, in apply
+    return self.apply_async(func, args, kwds).get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 774, in get
+    raise self._value
+ValueError: Operand 0 of operation \"scf.yield\" must be a Value (is not a Value)```"

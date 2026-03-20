@@ -2,9 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v238: BSM=16 for K>4096 split-K path (from 8). For M=16: 1 M-tile
-(exact fit) vs 2 tiles with modular wrapping. Grid 119 vs 238 blocks.
-Each block processes all 16 M-rows directly.
+v237: Route M=64 to two-phase (quant + ASM 32x128 GEMM) instead of
+fused preshuffle. FUSED_M_THRESHOLD from 64 to 32. Fused M=64 is 13.3us;
+two-phase was 13.5us at v045 level but quant kernel now heavily optimized.
+Separate quant lets ASM GEMM run at full efficiency.
 """
 import torch
 import triton
@@ -32,7 +33,7 @@ _buffers = {}
 _ASM_KERNEL_32x128 = "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E"
 
 # Threshold: use fused for M <= this value
-_FUSED_M_THRESHOLD = 64
+_FUSED_M_THRESHOLD = 32
 
 
 def _get_fused_config(M, N, K):
@@ -41,10 +42,10 @@ def _get_fused_config(M, N, K):
     """
     if K > 4096:
         # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
-        # BSM=16: 119 blocks (0.46 waves), exact M=16 coverage (1 tile)
+        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
         # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
-            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,

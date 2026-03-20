@@ -2,14 +2,15 @@
 #!POPCORN gpu MI355X
 
 """
-v104: Use mla_decode_fwd non-persistent for ALL shapes.
+v105: Use bf16 Q + bf16 KV (a16w16) to eliminate Q quantization overhead.
 
-mla_decode_fwd handles splits internally:
-- splits==1 + fp8: writes directly to output (no reduce)
-- splits>1: calls stage1_asm + Triton stage2 reduce
+The per_tensor_quant_hip call costs ~5-10us. For small batch sizes (bs=4,32)
+this is a significant fraction of total time. Using bf16 KV costs 2x bandwidth
+but saves a kernel launch + quant compute.
 
-Cache kv_indices/kv_last_page_len (shape-constant).
-Allocate output fresh each call to avoid stale data on LB recheck.
+Uses mla_decode_fwd non-persistent mode which handles all split logic internally.
+The a16w16 kernel (mla_dec_stage1_bf16_a16w16_subQ16_mqa16) handles bf16+bf16
+for qseqlen=1 non-persistent.
 
 WARNING: page_size=1 EVERYWHERE.
 """
@@ -17,11 +18,7 @@ WARNING: page_size=1 EVERYWHERE.
 import torch
 from task import input_t, output_t
 
-from aiter import dtypes as aiter_dtypes
-from aiter import per_tensor_quant_hip
 from aiter.mla import mla_decode_fwd
-
-FP8_DTYPE = aiter_dtypes.fp8
 
 # MLA constants
 NUM_HEADS = 16
@@ -42,31 +39,29 @@ def custom_kernel(data: input_t) -> output_t:
     kv_seq_len = config["kv_seq_len"]
     q_total = q.shape[0]
 
-    # FP8 path — quantize Q
-    kv_buffer_fp8, kv_scale = kv_data["fp8"]
-    q_fp8, q_scale = per_tensor_quant_hip(q.view(-1, NUM_HEADS, QK_HEAD_DIM), quant_dtype=FP8_DTYPE)
-    q_scale = q_scale.reshape(1)
+    # bf16 path — no quantization needed
+    kv_buffer_bf16 = kv_data["bf16"]
+    q_bf16 = q.view(-1, NUM_HEADS, QK_HEAD_DIM)
 
-    kv_buffer_4d = kv_buffer_fp8.view(-1, 1, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
+    kv_buffer_4d = kv_buffer_bf16.view(-1, 1, NUM_KV_HEADS, kv_buffer_bf16.shape[-1])
 
-    # Cache kv metadata per shape (constant across calls); allocate output fresh
+    # Cache output buffer and kv metadata per shape
     key = (batch_size, kv_seq_len)
     if key not in _cache:
         total_kv = batch_size * kv_seq_len
         kv_indices = torch.arange(total_kv, dtype=torch.int32, device="cuda")
         kv_last_page_len = torch.full((batch_size,), kv_seq_len, dtype=torch.int32, device="cuda")
-        _cache[key] = (kv_indices, kv_last_page_len)
+        output = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
+        _cache[key] = (kv_indices, kv_last_page_len, output)
 
-    kv_indices, kv_last_page_len = _cache[key]
-    output = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
+    kv_indices, kv_last_page_len, output = _cache[key]
 
     mla_decode_fwd(
-        q_fp8, kv_buffer_4d, output,
+        q_bf16, kv_buffer_4d, output,
         qo_indptr, kv_indptr,
         kv_indices, kv_last_page_len,
         1,  # max_seqlen_q
         page_size=1, nhead_kv=NUM_KV_HEADS, sm_scale=SM_SCALE,
-        q_scale=q_scale, kv_scale=kv_scale,
         intra_batch_mode=False,
     )
 

@@ -2,10 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v168: Pre-allocate quantization output buffers (x_fp4, blockscale_e8m0_sorted)
-for both stage1 and stage2 quant calls. Inline the fused_dynamic_mxfp4_quant_moe_sort
-Triton kernel launch with cached output tensors to eliminate 4 torch.empty allocations
-per forward pass on CK 2-stage shapes.
+v181: Use FlyDSL stage1 kernel (afp4_wfp4_bf16 tile_m=32/64 tile_n=256 tile_k=256)
+for ksplit=0 CK 2-stage shapes, replacing CK ck_moe_stage1_fwd. FlyDSL may have
+better wave scheduling for these shapes.
 """
 import os
 import functools
@@ -27,6 +26,7 @@ from aiter.ops.triton._triton_kernels.quant.fused_mxfp4_quant import (
     _fused_dynamic_mxfp4_quant_moe_sort_kernel,
 )
 from aiter.utility import fp4_utils
+import aiter.ops.flydsl
 
 # Register FlyDSL tile_k=128 kernels
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"] = {
@@ -369,24 +369,37 @@ def custom_kernel(data: input_t) -> output_t:
             sorted_weights=sorted_weights,
         )
     else:
-        # CK 2-stage path: fp4 activation quant with pre-allocated buffers
+        # FlyDSL stage1 + FlyDSL stage2 path: fp4 activation quant with pre-allocated buffers
         w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
         w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
 
-        # Stage 1: quant activations + gate_up GEMM + SwiGLU
+        # Stage 1: quant activations + gate_up GEMM + SwiGLU via FlyDSL
         a1, a1_scale = _quant_prealloc(
             hidden_states, sorted_ids, num_valid_ids,
             token_num, 1, block_size_M, device,
         )
 
         a2 = _get_or_alloc_a2(M, topk, inter_dim, device)
-        a2 = metadata.stage1(
-            a1, w1, w2,
-            sorted_ids, sorted_expert_ids, num_valid_ids,
-            a2, topk,
-            block_m=block_size_M,
-            a1_scale=a1_scale,
+
+        # FlyDSL stage1: fp4 input, fp4 weights, bf16 output
+        # tile_m chosen based on block_size_M (matching sorting granularity)
+        _flydsl_tile_m = min(block_size_M, 64)  # FlyDSL supports 16,32,64,128
+        aiter.ops.flydsl.flydsl_moe_stage1(
+            a=a1,
+            w1=w1,
+            sorted_token_ids=sorted_ids,
+            sorted_expert_ids=sorted_expert_ids,
+            num_valid_ids=num_valid_ids,
+            out=a2,
+            topk=topk,
+            tile_m=_flydsl_tile_m,
+            tile_n=256,
+            tile_k=256,
+            a_dtype="fp4",
+            b_dtype="fp4",
+            out_dtype="bf16",
             w1_scale=w1_scale_view,
+            a1_scale=a1_scale,
             sorted_weights=None,
         )
 
@@ -398,7 +411,7 @@ def custom_kernel(data: input_t) -> output_t:
         )
         a2_quant = a2_quant.view(token_num, topk, -1)
 
-        # Stage 2: down GEMM + weighted reduction
+        # Stage 2: down GEMM + weighted reduction (keep existing FlyDSL/CK stage2)
         metadata.stage2(
             a2_quant, w1, w2,
             sorted_ids, sorted_expert_ids, num_valid_ids,
