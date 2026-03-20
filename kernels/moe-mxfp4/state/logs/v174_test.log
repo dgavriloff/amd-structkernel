@@ -1,0 +1,149 @@
+Submitting to leaderboard: amd-moe-mxfp4
+GPU: MI355X
+Mode: test
+File: submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+{"status": "processing", "elapsed_time": 15.37}
+{"status": "processing", "elapsed_time": 30.37}
+{"status": "processing", "elapsed_time": 45.37}
+{"status": "processing", "elapsed_time": 61.03}
+{"status": "processing", "elapsed_time": 76.04}
+{"status": "processing", "elapsed_time": 91.04}
+{"status": "processing", "elapsed_time": 106.04}
+{"status": "processing", "elapsed_time": 121.52}
+{"status": "processing", "elapsed_time": 136.52}
+{"status": "processing", "elapsed_time": 151.52}
+{"status": "processing", "elapsed_time": 166.52}
+{"status": "processing", "elapsed_time": 181.52}
+{"status": "processing", "elapsed_time": 196.56}
+{"status": "processing", "elapsed_time": 211.56}
+{"status": "processing", "elapsed_time": 226.56}
+{"status": "processing", "elapsed_time": 241.56}
+{"status": "processing", "elapsed_time": 256.56}
+{"status": "processing", "elapsed_time": 272.4}
+{"status": "processing", "elapsed_time": 287.4}
+{"status": "processing", "elapsed_time": 302.4}
+{"status": "processing", "elapsed_time": 317.41}
+STDERR (Run 1):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 0
+[aiter] [fused_moe] using 2stage default for (256, 8, 4096, 1024, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] [32mfinish build [module_moe_sorting], cost 25.6s [0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+[aiter] start build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/build/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_
+[aiter] [32mfinish build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_], cost 112.2s [0m
+[aiter] import [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_.so
+[aiter] type hints mismatch, override to --> ck_moe_stage1(hidden_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w1_scale: Optional[torch.Tensor] = None, a1_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 157, in _run_single_test
+    submission_output = custom_kernel(_clone_data(data))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/submission.py", line 457, in custom_kernel
+    tile_m=_s2_parsed["tile_m"],
+           ~~~~~~~~~~^^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 382, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 352, in main
+    return run_testing(logger, pool, tests)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 181, in run_testing
+    good, message = run_single_test(pool, test)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 166, in run_single_test
+    return pool.apply(_run_single_test, (test,))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 360, in apply
+    return self.apply_async(func, args, kwds).get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 774, in get
+    raise self._value
+TypeError: 'NoneType' object is not subscriptable
+
+
+"**MI355X on GitHub ✅ success**
+> Workflow [23355434293](<https://github.com/gpu-mode/kernelbot/actions/runs/23355434293>) completed
+> Downloading artifacts... done
+> ❌ Running tests failed (internal error 1)
+
+Running on:
+* GPU: `AMD Instinct MI355X`
+* CPU: `AMD EPYC 9575F 64-Core Processor`
+* Device count: `1`
+* Runtime: `ROCm`
+* Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
+* Torch: `2.10.0+rocm7.1`
+* Hostname: `arc-runner-set-h82gb-runner-xw29k`
+# Running failed
+Command ```bash
+python3 eval.py test /tmp/tmpx850zy4a```
+exited with error code **1** after 145.04 seconds.
+
+## Program stderr:
+```
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 0
+[aiter] [fused_moe] using 2stage default for (256, 8, 4096, 1024, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] \u001b[32mfinish build [module_moe_sorting], cost 25.6s \u001b[0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+[aiter] start build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/build/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_
+[aiter] \u001b[32mfinish build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_], cost 112.2s \u001b[0m
+[aiter] import [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_.so
+[aiter] type hints mismatch, override to --> ck_moe_stage1(hidden_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w1_scale: Optional[torch.Tensor] = None, a1_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+multiprocessing.pool.RemoteTraceback: 
+\"\"\"
+Traceback (most recent call last):
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 157, in _run_single_test
+    submission_output = custom_kernel(_clone_data(data))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/submission.py\", line 457, in custom_kernel
+    tile_m=_s2_parsed[\"tile_m\"],
+           ~~~~~~~~~~^^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+\"\"\"
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 382, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 352, in main
+    return run_testing(logger, pool, tests)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 181, in run_testing
+    good, message = run_single_test(pool, test)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 166, in run_single_test
+    return pool.apply(_run_single_test, (test,))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 360, in apply
+    return self.apply_async(func, args, kwds).get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 774, in get
+    raise self._value
+TypeError: 'NoneType' object is not subscriptable```"

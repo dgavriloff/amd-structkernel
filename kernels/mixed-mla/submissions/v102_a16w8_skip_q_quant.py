@@ -2,22 +2,16 @@
 #!POPCORN gpu MI355X
 
 """
-v103: Direct ASM kernel calls with fully pre-allocated buffers.
+v102: Use bf16 Q with fp8 KV (a16w8 kernel) to skip Q quantization overhead.
 
-For splits==1 (fp8 Q+KV non-persistent):
-- Call mla_decode_stage1_asm_fwd directly with logits=output.view(4D)
-- Stage1 writes directly to output, no reduce needed
-- Pre-allocate attn_lse (required by stage1 but unused after)
+The a16w8 MLA kernel (mla_a16w8_qh16_m16x4_n16x1_coex0_mask1_ps.co) accepts
+bf16 Q + fp8 KV. This eliminates the per_tensor_quant_hip call (~5-10us)
+while keeping fp8 KV bandwidth savings (2x less than bf16 KV).
 
-For splits>1 (fp8 persistent):
-- Use stage1_asm + mla_reduce_v1 as before
-- All buffers pre-allocated
+For the non-persistent splits=1 path, this saves: 1 kernel launch (quant) +
+Python overhead. For persistent splits>1, same savings.
 
-Key savings vs v99:
-- No mla_decode_fwd Python wrapper overhead
-- No per-call tensor allocations (logits, attn_lse, final_lse)
-- No num_kv_splits_indptr computation
-- Minimal Python path per call
+NO CUDA GRAPHS — LB uses recheck=True with new data each iteration.
 
 WARNING: page_size=1 EVERYWHERE.
 """
@@ -28,7 +22,7 @@ from task import input_t, output_t
 from aiter import dtypes as aiter_dtypes
 from aiter import get_mla_metadata_info_v1, get_mla_metadata_v1
 from aiter import mla_decode_stage1_asm_fwd, mla_reduce_v1
-from aiter import per_tensor_quant_hip
+from aiter.mla import mla_decode_fwd
 
 FP8_DTYPE = aiter_dtypes.fp8
 
@@ -65,7 +59,8 @@ def _choose_num_kv_splits(batch_size, kv_seq_len):
             best_score = score
             best_splits = splits
 
-    # FP8 min_block_n constraint
+    # For a16w8, block_n constraints may differ from a8w8
+    # Use same constraint for safety
     min_block_n = 128
     max_splits_for_seqlen = max(1, int(avg_kv + min_block_n - 1) // min_block_n)
     best_splits = min(best_splits, max_splits_for_seqlen)
@@ -73,34 +68,15 @@ def _choose_num_kv_splits(batch_size, kv_seq_len):
     return best_splits
 
 
-def _build_nonpersistent_splits1(batch_size, q_total):
-    """Pre-allocate buffers for non-persistent splits==1 path.
-    Stage1 writes directly to output (logits = output reshaped).
-    """
-    output = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
-    # logits is just output viewed as 4D - stage1 writes directly here
-    logits = output.view(q_total, 1, NUM_HEADS, V_HEAD_DIM)
-    # attn_lse is required by stage1 but not used after (no reduce for splits==1)
-    attn_lse = torch.empty((q_total, 1, NUM_HEADS, 1), dtype=torch.float32, device="cuda")
-    # kv metadata
-    total_kv = batch_size * 8192  # max kv_seq_len, oversize is fine
-    kv_indices = torch.arange(total_kv, dtype=torch.int32, device="cuda")
-    num_kv_splits_indptr = torch.arange(0, batch_size + 1, dtype=torch.int32, device="cuda")
-
-    return {
-        "output": output, "logits": logits, "attn_lse": attn_lse,
-        "kv_indices": kv_indices, "num_kv_splits_indptr": num_kv_splits_indptr,
-    }
-
-
-def _build_persistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr, kv_indptr, num_kv_splits):
+def _build_meta_persistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr, kv_indptr, dtype_q, dtype_kv, num_kv_splits):
     """Build metadata for persistent mode."""
     total_kv_len = batch_size * kv_seq_len
     kv_indices = torch.arange(total_kv_len, dtype=torch.int32, device="cuda")
+    kv_indptr_use = kv_indptr
     kv_last_page_len = (kv_indptr[1:] - kv_indptr[:-1]).to(torch.int32)
 
     info = get_mla_metadata_info_v1(
-        batch_size, q_seq_len, NUM_HEADS, FP8_DTYPE, FP8_DTYPE,
+        batch_size, q_seq_len, NUM_HEADS, dtype_q, dtype_kv,
         is_sparse=False, fast_mode=True,
         num_kv_splits=num_kv_splits, intra_batch_mode=True,
     )
@@ -109,14 +85,14 @@ def _build_persistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr, kv_
      reduce_indptr, reduce_final_map, reduce_partial_map) = work
 
     get_mla_metadata_v1(
-        qo_indptr, kv_indptr, kv_last_page_len,
+        qo_indptr, kv_indptr_use, kv_last_page_len,
         NUM_HEADS // NUM_KV_HEADS, NUM_KV_HEADS, True,
         work_metadata, work_info_set, work_indptr,
         reduce_indptr, reduce_final_map, reduce_partial_map,
         page_size=1, kv_granularity=16,
         max_seqlen_qo=q_seq_len, uni_seqlen_qo=q_seq_len,
         fast_mode=True, max_split_per_batch=num_kv_splits,
-        intra_batch_mode=True, dtype_q=FP8_DTYPE, dtype_kv=FP8_DTYPE,
+        intra_batch_mode=True, dtype_q=dtype_q, dtype_kv=dtype_kv,
     )
 
     num_partials = reduce_partial_map.numel()
@@ -130,8 +106,30 @@ def _build_persistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr, kv_
         "reduce_final_map": reduce_final_map, "reduce_partial_map": reduce_partial_map,
         "split_data": split_data, "split_lse": split_lse, "output": output,
         "kv_indices": kv_indices, "kv_last_page_len": kv_last_page_len,
-        "kv_indptr_use": kv_indptr,
+        "kv_indptr_use": kv_indptr_use,
     }
+
+
+def _build_meta_nonpersistent(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr, kv_indptr, num_kv_splits):
+    """Build metadata for non-persistent mode."""
+    total_kv_len = batch_size * kv_seq_len
+    kv_indices = torch.arange(total_kv_len, dtype=torch.int32, device="cuda")
+    kv_last_page_len = (kv_indptr[1:] - kv_indptr[:-1]).to(torch.int32)
+    num_kv_splits_indptr = torch.arange(0, (batch_size + 1) * num_kv_splits, num_kv_splits, dtype=torch.int32, device="cuda")
+    output = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
+
+    return {
+        "kv_indices": kv_indices, "kv_last_page_len": kv_last_page_len,
+        "num_kv_splits_indptr": num_kv_splits_indptr, "output": output,
+    }
+
+
+def _get_cached(key, build_fn, *args, **kwargs):
+    if key in _cache:
+        return _cache[key]
+    cached = build_fn(*args, **kwargs)
+    _cache[key] = cached
+    return cached
 
 
 def custom_kernel(data: input_t) -> output_t:
@@ -142,56 +140,52 @@ def custom_kernel(data: input_t) -> output_t:
     q_seq_len = config.get("q_seq_len", 1)
     q_total = q.shape[0]
 
-    # FP8 path — quantize Q
+    # a16w8 path: bf16 Q + fp8 KV — no Q quantization needed
     kv_buffer_fp8, kv_scale = kv_data["fp8"]
-    q_fp8, q_scale = per_tensor_quant_hip(q.view(-1, NUM_HEADS, QK_HEAD_DIM), quant_dtype=FP8_DTYPE)
-    q_scale = q_scale.reshape(1)
-
+    q_bf16 = q.view(-1, NUM_HEADS, QK_HEAD_DIM)  # already bf16
     num_splits = _choose_num_kv_splits(batch_size, kv_seq_len)
+
     kv_buffer_4d = kv_buffer_fp8.view(-1, 1, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
 
     if num_splits == 1:
-        # Non-persistent: stage1 writes directly to output (no reduce needed)
-        key = ('np1', batch_size)
-        if key not in _cache:
-            _cache[key] = _build_nonpersistent_splits1(batch_size, q_total)
-        cached = _cache[key]
-
-        # Compute kv_last_page_len on the fly (cheap)
-        kv_last_page_len = (kv_indptr[1:] - kv_indptr[:-1]).to(torch.int32)
-
-        # Slice kv_indices to actual size
-        total_kv = batch_size * kv_seq_len
-        kv_indices = cached["kv_indices"][:total_kv]
-
-        mla_decode_stage1_asm_fwd(
-            q_fp8, kv_buffer_4d, qo_indptr,
-            kv_indptr, kv_indices, kv_last_page_len,
-            cached["num_kv_splits_indptr"],  # non-persistent mode
-            None, None, None,  # no work metadata
-            q_seq_len, 1, NUM_KV_HEADS, SM_SCALE,
-            cached["logits"], cached["attn_lse"], cached["output"],
-            q_scale, kv_scale,
+        # Non-persistent mode
+        cached = _get_cached(
+            ('a16w8_np', batch_size, q_seq_len, kv_seq_len),
+            _build_meta_nonpersistent,
+            batch_size, q_seq_len, kv_seq_len, q_total,
+            qo_indptr, kv_indptr, num_splits,
         )
-        return cached["output"]
+        output = cached["output"]
+
+        mla_decode_fwd(
+            q_bf16, kv_buffer_4d, output,
+            qo_indptr, kv_indptr,
+            cached["kv_indices"], cached["kv_last_page_len"],
+            q_seq_len,
+            page_size=1, nhead_kv=NUM_KV_HEADS, sm_scale=SM_SCALE,
+            num_kv_splits=num_splits,
+            num_kv_splits_indptr=cached["num_kv_splits_indptr"],
+            q_scale=None, kv_scale=kv_scale,
+            intra_batch_mode=False,
+        )
+        return output
 
     else:
         # Persistent mode with multiple splits
-        key = ('ps', batch_size, q_seq_len, kv_seq_len, num_splits)
-        if key not in _cache:
-            _cache[key] = _build_persistent(
-                batch_size, q_seq_len, kv_seq_len, q_total,
-                qo_indptr, kv_indptr, num_splits,
-            )
-        cached = _cache[key]
+        cached = _get_cached(
+            ('a16w8_ps', batch_size, q_seq_len, kv_seq_len, num_splits),
+            _build_meta_persistent,
+            batch_size, q_seq_len, kv_seq_len, q_total,
+            qo_indptr, kv_indptr, torch.bfloat16, FP8_DTYPE, num_splits,
+        )
 
         mla_decode_stage1_asm_fwd(
-            q_fp8, kv_buffer_4d, qo_indptr,
+            q_bf16, kv_buffer_4d, qo_indptr,
             cached["kv_indptr_use"], cached["kv_indices"], cached["kv_last_page_len"],
             None, cached["work_meta_data"], cached["work_indptr"], cached["work_info_set"],
             q_seq_len, 1, NUM_KV_HEADS, SM_SCALE,
             cached["split_data"], cached["split_lse"], cached["output"],
-            q_scale, kv_scale,
+            None, kv_scale,
         )
         mla_reduce_v1(
             cached["split_data"], cached["split_lse"],

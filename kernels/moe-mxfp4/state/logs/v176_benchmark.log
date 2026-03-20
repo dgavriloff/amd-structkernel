@@ -1,0 +1,141 @@
+Submitting to leaderboard: amd-moe-mxfp4
+GPU: MI355X
+Mode: benchmark
+File: submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+{"status": "processing", "elapsed_time": 15.0}
+{"status": "processing", "elapsed_time": 30.0}
+{"status": "processing", "elapsed_time": 45.77}
+{"status": "processing", "elapsed_time": 60.77}
+{"status": "processing", "elapsed_time": 75.77}
+{"status": "processing", "elapsed_time": 90.81}
+{"status": "processing", "elapsed_time": 105.81}
+{"status": "processing", "elapsed_time": 120.81}
+{"status": "processing", "elapsed_time": 135.81}
+{"status": "processing", "elapsed_time": 150.81}
+{"status": "processing", "elapsed_time": 165.82}
+{"status": "processing", "elapsed_time": 180.82}
+{"status": "processing", "elapsed_time": 195.82}
+{"status": "processing", "elapsed_time": 210.82}
+{"status": "processing", "elapsed_time": 225.82}
+{"status": "processing", "elapsed_time": 240.82}
+{"status": "processing", "elapsed_time": 256.79}
+{"status": "processing", "elapsed_time": 272.49}
+{"status": "processing", "elapsed_time": 287.49}
+{"status": "processing", "elapsed_time": 303.31}
+{"status": "processing", "elapsed_time": 319.61}
+{"status": "processing", "elapsed_time": 334.61}
+{"status": "processing", "elapsed_time": 349.61}
+{"status": "processing", "elapsed_time": 364.77}
+{"status": "processing", "elapsed_time": 379.77}
+{"status": "processing", "elapsed_time": 394.77}
+{"status": "processing", "elapsed_time": 409.78}
+{"status": "processing", "elapsed_time": 424.78}
+{"status": "processing", "elapsed_time": 439.78}
+{"status": "processing", "elapsed_time": 455.21}
+{"status": "processing", "elapsed_time": 470.21}
+STDERR (Run 1):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] [fused_moe] using 2stage (kernelName1='', kernelName2='') for (256, 16, 7168, 256, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] [32mfinish build [module_moe_sorting], cost 25.3s [0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+[aiter] start build [module_moe_cktile2stages] under /home/runner/aiter/aiter/jit/build/module_moe_cktile2stages
+[aiter] [32mfinish build [module_moe_cktile2stages], cost 102.5s [0m
+[aiter] import [module_moe_cktile2stages] under /home/runner/aiter/aiter/jit/module_moe_cktile2stages.so
+[aiter] type hints mismatch, override to --> cktile_moe_gemm1(XQ: torch.Tensor, WQ: torch.Tensor, Y: torch.Tensor, sorted_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, max_token_ids: torch.Tensor, topk: int | typing.SupportsIndex, n_padded_zeros: int | Optional[typing.SupportsIndex] = 0, k_padded_zeros: int | Optional[typing.SupportsIndex] = 0, topk_weight: Optional[torch.Tensor] = None, x_scale: Optional[torch.Tensor] = None, w_scale: Optional[torch.Tensor] = None, exp_bias: Optional[torch.Tensor] = None, activation: int | Optional[typing.SupportsIndex] = 0, block_m: int | Optional[typing.SupportsIndex] = 32, split_k: int | Optional[typing.SupportsIndex] = 1) -> torch.Tensor
+[aiter] start build [module_activation] under /home/runner/aiter/aiter/jit/build/module_activation
+[aiter] [32mfinish build [module_activation], cost 22.3s [0m
+[aiter] import [module_activation] under /home/runner/aiter/aiter/jit/module_activation.so
+[aiter] type hints mismatch, override to --> cktile_moe_gemm2(XQ: torch.Tensor, WQ: torch.Tensor, Y: torch.Tensor, sorted_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, max_token_ids: torch.Tensor, topk: int | typing.SupportsIndex, n_padded_zeros: int | Optional[typing.SupportsIndex] = 0, k_padded_zeros: int | Optional[typing.SupportsIndex] = 0, topk_weight: Optional[torch.Tensor] = None, x_scale: Optional[torch.Tensor] = None, w_scale: Optional[torch.Tensor] = None, exp_bias: Optional[torch.Tensor] = None, activation: int | Optional[typing.SupportsIndex] = 0, block_m: int | Optional[typing.SupportsIndex] = 32, split_k: int | Optional[typing.SupportsIndex] = 1) -> torch.Tensor
+[aiter] [fused_moe] using 2stage (kernelName1='', kernelName2='') for (256, 128, 7168, 256, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 512, 7168, 256, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/build/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_
+[aiter] [32mfinish build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_], cost 103.4s [0m
+[aiter] import [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_.so
+[aiter] type hints mismatch, override to --> ck_moe_stage1(hidden_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w1_scale: Optional[torch.Tensor] = None, a1_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+[aiter] [fused_moe] using 2stage (kernelName1='', kernelName2='') for (256, 16, 7168, 512, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 128, 7168, 512, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 512, 7168, 512, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 512, 7168, 2048, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+
+
+"**MI355X on GitHub ✅ success**
+> Workflow [23355990074](<https://github.com/gpu-mode/kernelbot/actions/runs/23355990074>) completed
+> Downloading artifacts... done
+> ✅ Benchmarking successful
+
+Running on:
+* GPU: `AMD Instinct MI355X`
+* CPU: `AMD EPYC 9575F 64-Core Processor`
+* Device count: `1`
+* Runtime: `ROCm`
+* Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
+* Torch: `2.10.0+rocm7.1`
+* Hostname: `arc-runner-set-h82gb-runner-j9szp`
+
+
+## Benchmarks:
+```
+bs: 16; seed: 9371; dexpert: 256; dhidden: 7168; nroutedexperts: 256; nsharedexperts: 1; nexpertspertoken: 8
+ ⏱ 94.4 ± 0.09 µs
+ ⚡ 92.4 µs 🐌 99.0 µs
+
+bs: 128; seed: 2291; dexpert: 256; dhidden: 7168; nroutedexperts: 256; nsharedexperts: 1; nexpertspertoken: 8
+ ⏱ 184 ± 0.2 µs
+ ⚡ 181 µs 🐌 187 µs
+
+bs: 512; seed: 81934; dexpert: 256; dhidden: 7168; nroutedexperts: 256; nsharedexperts: 1; nexpertspertoken: 8
+ ⏱ 228 ± 0.2 µs
+ ⚡ 228 µs 🐌 228 µs
+
+bs: 16; seed: 2291; dexpert: 512; dhidden: 7168; nroutedexperts: 32; nsharedexperts: 1; nexpertspertoken: 8
+ ⏱ 65.2 ± 0.07 µs
+ ⚡ 63.2 µs 🐌 71.6 µs
+
+bs: 128; seed: 81934; dexpert: 512; dhidden: 7168; nroutedexperts: 32; nsharedexperts: 1; nexpertspertoken: 8
+ ⏱ 91.2 ± 0.09 µs
+ ⚡ 89.5 µs 🐌 95.4 µs
+
+bs: 512; seed: 81934; dexpert: 512; dhidden: 7168; nroutedexperts: 32; nsharedexperts: 1; nexpertspertoken: 8
+ ⏱ 103 ± 0.1 µs
+ ⚡ 101 µs 🐌 107 µs
+
+bs: 512; seed: 81934; dexpert: 2048; dhidden: 7168; nroutedexperts: 32; nsharedexperts: 1; nexpertspertoken: 8
+ ⏱ 181 ± 0.2 µs
+ ⚡ 179 µs 🐌 187 µs
+```
+
+## Program stderr:
+```
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] [fused_moe] using 2stage (kernelName1='', kernelName2='') for (256, 16, 7168, 256, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] \u001b[32mfinish build [module_moe_sorting], cost 25.3s \u001b[0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+[aiter] start build [module_moe_cktile2stages] under /home/runner/aiter/aiter/jit/build/module_moe_cktile2stages
+[aiter] \u001b[32mfinish build [module_moe_cktile2stages], cost 102.5s \u001b[0m
+[aiter] import [module_moe_cktile2stages] under /home/runner/aiter/aiter/jit/module_moe_cktile2stages.so
+[aiter] type hints mismatch, override to --> cktile_moe_gemm1(XQ: torch.Tensor, WQ: torch.Tensor, Y: torch.Tensor, sorted_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, max_token_ids: torch.Tensor, topk: int | typing.SupportsIndex, n_padded_zeros: int | Optional[typing.SupportsIndex] = 0, k_padded_zeros: int | Optional[typing.SupportsIndex] = 0, topk_weight: Optional[torch.Tensor] = None, x_scale: Optional[torch.Tensor] = None, w_scale: Optional[torch.Tensor] = None, exp_bias: Optional[torch.Tensor] = None, activation: int | Optional[typing.SupportsIndex] = 0, block_m: int | Optional[typing.SupportsIndex] = 32, split_k: int | Optional[typing.SupportsIndex] = 1) -> torch.Tensor
+[aiter] start build [module_activation] under /home/runner/aiter/aiter/jit/build/module_activation
+[aiter] \u001b[32mfinish build [module_activation], cost 22.3s \u001b[0m
+[aiter] import [module_activation] under /home/runner/aiter/aiter/jit/module_activation.so
+[aiter] type hints mismatch, override to --> cktile_moe_gemm2(XQ: torch.Tensor, WQ: torch.Tensor, Y: torch.Tensor, sorted_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, max_token_ids: torch.Tensor, topk: int | typing.SupportsIndex, n_padded_zeros: int | Optional[typing.SupportsIndex] = 0, k_padded_zeros: int | Optional[typing.SupportsIndex] = 0, topk_weight: Optional[torch.Tensor] = None, x_scale: Optional[torch.Tensor] = None, w_scale: Optional[torch.Tensor] = None, exp_bias: Optional[torch.Tensor] = None, activation: int | Optional[typing.SupportsIndex] = 0, block_m: int | Optional[typing.SupportsIndex] = 32, split_k: int | Optional[typing.SupportsIndex] = 1) -> torch.Tensor
+[aiter] [fused_moe] using 2stage (kernelName1='', kernelName2='') for (256, 128, 7168, 256, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 512, 7168, 256, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/build/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_
+[aiter] \u001b[32mfinish build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_], cost 103.4s \u001b[0m
+[aiter] import [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_.so
+[aiter] type hints mismatch, override to --> ck_moe_stage1(hidden_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w1_scale: Optional[torch.Tensor] = None, a1_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+[aiter] [fused_moe] using 2stage (kernelName1='', kernelName2='') for (256, 16, 7168, 512, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 128, 7168, 512, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 512, 7168, 512, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] [fused_moe] using 2stage (kernelName1='moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16', kernelName2='flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic') for (256, 512, 7168, 2048, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False)```"

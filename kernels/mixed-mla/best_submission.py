@@ -2,17 +2,18 @@
 #!POPCORN gpu MI355X
 
 """
-v100: Keep CUDA graphs but remove Q fp8 caching.
+v099: Remove CUDA graphs and Q quantization caching to fix LB correctness.
 
-Key changes over v096:
-1. Replace quantize_fp8_cached with quantize_fp8 (no caching).
-   The Q cache was stale when different shapes reused the same data_ptr.
-2. CUDA graphs still work correctly: graph capture uses fresh Q quantization,
-   and graph replay uses the same tensors (correct in BM mode where data
-   doesn't change between iterations).
-3. Overhead is minimal: quantize_fp8 only runs once per shape (during graph
-   capture). All timing iterations replay the graph without re-quantizing.
-4. fp8 path for all shapes, non-persistent (splits=1) vs persistent (splits>1).
+v096 used CUDA graphs which replay a fixed execution plan. The LB uses
+recheck=True (new random data each iteration, seed += 13), so CUDA graph
+replay produces stale/wrong results. All kv=8192 shapes failed with
+thousands of mismatched elements.
+
+Also removes quantize_fp8_cached which cached based on data_ptr — stale
+when new data is written to the same allocation.
+
+Keeps: fp8 for all shapes, non-persistent (splits=1) vs persistent
+(splits>1) split logic, per-shape split tuning.
 
 WARNING: page_size=1 EVERYWHERE.
 """
@@ -148,10 +149,6 @@ def _get_cached(key, build_fn, *args, **kwargs):
     return cached
 
 
-# CUDA graph cache: key -> (graph, output_tensor)
-_graph_cache = {}
-
-
 def custom_kernel(data: input_t) -> output_t:
     q, kv_data, qo_indptr, kv_indptr, config = data
 
@@ -160,22 +157,13 @@ def custom_kernel(data: input_t) -> output_t:
     q_seq_len = config.get("q_seq_len", 1)
     q_total = q.shape[0]
 
-    # FP8 path for all shapes
+    # FP8 path for all shapes — no CUDA graphs, fresh quantization every call
     kv_buffer_fp8, kv_scale = kv_data["fp8"]
-    q_reshaped = q.view(-1, NUM_HEADS, QK_HEAD_DIM)
+    q_fp8, q_scale = quantize_fp8(q.view(-1, NUM_HEADS, QK_HEAD_DIM))
     num_splits = _choose_num_kv_splits(batch_size, kv_seq_len)
 
     if num_splits == 1:
         # Non-persistent mode
-        graph_key = ('fp8_np', batch_size, kv_seq_len, q.data_ptr(), kv_buffer_fp8.data_ptr())
-        if graph_key in _graph_cache:
-            graph, output = _graph_cache[graph_key]
-            graph.replay()
-            return output
-
-        # Fresh quantization (no caching to avoid stale data)
-        q_fp8, q_scale = quantize_fp8(q_reshaped)
-
         cached = _get_cached(
             ('fp8_np', batch_size, q_seq_len, kv_seq_len),
             _build_meta_nonpersistent,
@@ -185,7 +173,6 @@ def custom_kernel(data: input_t) -> output_t:
         kv_buffer_4d = kv_buffer_fp8.view(-1, 1, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
         output = cached["output"]
 
-        # Warmup
         mla_decode_fwd(
             q_fp8, kv_buffer_4d, output,
             qo_indptr, kv_indptr,
@@ -197,38 +184,10 @@ def custom_kernel(data: input_t) -> output_t:
             q_scale=q_scale, kv_scale=kv_scale,
             intra_batch_mode=False,
         )
-        torch.cuda.synchronize()
-
-        # Capture graph
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            mla_decode_fwd(
-                q_fp8, kv_buffer_4d, output,
-                qo_indptr, kv_indptr,
-                cached["kv_indices"], cached["kv_last_page_len"],
-                q_seq_len,
-                page_size=1, nhead_kv=NUM_KV_HEADS, sm_scale=SM_SCALE,
-                num_kv_splits=num_splits,
-                num_kv_splits_indptr=cached["num_kv_splits_indptr"],
-                q_scale=q_scale, kv_scale=kv_scale,
-                intra_batch_mode=False,
-            )
-
-        _graph_cache[graph_key] = (graph, output)
-        graph.replay()
         return output
 
     else:
         # Persistent mode with multiple splits
-        graph_key = ('fp8_ps', batch_size, kv_seq_len, q.data_ptr(), kv_buffer_fp8.data_ptr())
-        if graph_key in _graph_cache:
-            graph, output = _graph_cache[graph_key]
-            graph.replay()
-            return output
-
-        # Fresh quantization (no caching to avoid stale data)
-        q_fp8, q_scale = quantize_fp8(q_reshaped)
-
         cached = _get_cached(
             ('fp8_ps', batch_size, q_seq_len, kv_seq_len, num_splits),
             _build_meta_persistent,
@@ -237,7 +196,6 @@ def custom_kernel(data: input_t) -> output_t:
         )
         kv_buffer_4d = kv_buffer_fp8.view(-1, 1, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
 
-        # Warmup
         mla_decode_stage1_asm_fwd(
             q_fp8, kv_buffer_4d, qo_indptr,
             cached["kv_indptr_use"], cached["kv_indices"], cached["kv_last_page_len"],
@@ -251,25 +209,4 @@ def custom_kernel(data: input_t) -> output_t:
             cached["reduce_indptr"], cached["reduce_final_map"], cached["reduce_partial_map"],
             q_seq_len, cached["output"], None,
         )
-        torch.cuda.synchronize()
-
-        # Capture graph
-        graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            mla_decode_stage1_asm_fwd(
-                q_fp8, kv_buffer_4d, qo_indptr,
-                cached["kv_indptr_use"], cached["kv_indices"], cached["kv_last_page_len"],
-                None, cached["work_meta_data"], cached["work_indptr"], cached["work_info_set"],
-                q_seq_len, 1, NUM_KV_HEADS, SM_SCALE,
-                cached["split_data"], cached["split_lse"], cached["output"],
-                q_scale, kv_scale,
-            )
-            mla_reduce_v1(
-                cached["split_data"], cached["split_lse"],
-                cached["reduce_indptr"], cached["reduce_final_map"], cached["reduce_partial_map"],
-                q_seq_len, cached["output"], None,
-            )
-
-        _graph_cache[graph_key] = (graph, cached["output"])
-        graph.replay()
         return cached["output"]

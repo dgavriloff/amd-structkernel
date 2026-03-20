@@ -1,5 +1,20 @@
 {
-  "mxfp4-mm": {"version": 211, "bm_score": 999999, "lb_score": null, "ts": "2026-03-20T00:00:00Z"},
-  "mixed-mla": {"version": 92, "bm_score": 999999, "lb_score": null, "ts": "2026-03-20T00:00:00Z"},
-  "moe-mxfp4": {"version": 160, "bm_score": 999999, "lb_score": null, "ts": "2026-03-20T00:00:00Z"}
+  "mxfp4-mm": {
+    "version": 224,
+    "bm_score": 8.667,
+    "lb_score": 9.127,
+    "ts": "2026-03-20T18:05:54.649187+00:00Z"
+  },
+  "mixed-mla": {
+    "version": 99,
+    "bm_score": 75.577,
+    "lb_score": 63.089,
+    "ts": "2026-03-20T17:51:59.273431+00:00Z"
+  },
+  "moe-mxfp4": {
+    "version": 168,
+    "bm_score": 122.404,
+    "lb_score": 125.099,
+    "ts": "2026-03-20T17:59:58.303149+00:00Z"
+  }
 }
