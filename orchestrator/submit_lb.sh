@@ -57,6 +57,11 @@ print(k.get('bm_score', k.get('score', 999999)))
     RESULT=$(popcorn-cli submit --gpu MI355X --leaderboard "$LEADERBOARD" --mode leaderboard --no-tui best_submission.py 2>&1) || true
     echo "$RESULT"
 
+    # Save raw output log
+    LB_LOGS_DIR="$kernel_dir/state/logs"
+    mkdir -p "$LB_LOGS_DIR"
+    echo "$RESULT" > "$LB_LOGS_DIR/lb_v${BM_VERSION}_$(date -u '+%Y%m%d_%H%M%S').log"
+
     # Check for submission failure
     if echo "$RESULT" | grep -qi "failed\|error\|timeout\|unauthorized"; then
         echo "[$kernel] LB submission FAILED — will retry next cycle"

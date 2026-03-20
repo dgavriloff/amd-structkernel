@@ -109,6 +109,11 @@ cd "$KERNEL_DIR"
 RESULT=$(popcorn-cli submit --gpu MI355X --leaderboard "$LEADERBOARD" --mode "$MODE" --no-tui submission.py 2>&1)
 echo "$RESULT"
 
+# Save raw output log
+LOGS_DIR="$STATE_DIR/logs"
+mkdir -p "$LOGS_DIR"
+echo "$RESULT" > "$LOGS_DIR/v${VERSION}_${MODE}.log"
+
 # Record rate limit entry
 python3 -c "
 import json
