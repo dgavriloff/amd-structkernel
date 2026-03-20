@@ -2,33 +2,22 @@
 #!POPCORN gpu MI355X
 
 """
-v186: Cache entire execution plan per shape key. On first call for each
-(M, E, inter_dim) combo, resolve metadata, pre-allocate all buffers, and
-build a fast-path closure. Subsequent calls dispatch directly with zero
-metadata lookups, config resolution, or allocation checks.
+v160: block_m=64 for bs=512/E=33 (d=512 and d=2048), was block_m=128.
+With ~15.5 tokens/expert, block_m=64 gives better CU distribution.
 """
 import os
 import functools
 import torch
-import triton
-from typing import Dict, Tuple, Optional
+from typing import Dict
 from task import input_t, output_t
 
-import aiter
-from aiter import ActivationType, QuantType, dtypes
-from aiter.fused_moe import (
-    get_2stage_cfgs, get_padded_M, get_inter_dim,
-    ck_moe_stage1, cktile_moe_stage1, cktile_moe_stage2,
-    _flydsl_stage2_wrapper,
-)
+from aiter import ActivationType, QuantType
+from aiter.fused_moe import fused_moe
 import aiter.fused_moe as _fused_moe_module
+import aiter
 import aiter.ops.flydsl.moe_kernels as _flydsl_moe_kernels
-from aiter.ops.triton._triton_kernels.quant.fused_mxfp4_quant import (
-    _fused_dynamic_mxfp4_quant_moe_sort_kernel,
-)
-from aiter.utility import fp4_utils
 
-# Register FlyDSL tile_k=128 kernels
+# Register FlyDSL tile_k=128 kernels that aren't in server's default registration
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"] = {
     "stage": 2, "a_dtype": "fp4", "b_dtype": "fp4", "out_dtype": "bf16",
     "tile_m": 32, "tile_n": 128, "tile_k": 128, "mode": "atomic", "MPerBlock": 32,
@@ -46,7 +35,7 @@ _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomi
     "tile_m": 16, "tile_n": 128, "tile_k": 128, "mode": "atomic", "MPerBlock": 16,
 }
 
-# Shape configs
+# Inject ksplit=2 configs for shapes that benefit from cktile_moe path
 _CUSTOM_CONFIGS = {}
 
 def _make_key(token, inter_dim, expert):
@@ -57,47 +46,90 @@ def _make_key(token, inter_dim, expert):
         "QuantType.per_1x32", True, False,
     )
 
-_4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
-_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
-_FLYDSL_STAGE2_M16_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
-
-# E=33 shapes
+# === E=33 shapes (from v018, proven) ===
+# bs=16/E=33/d=512: cktile_moe gives 59.6us vs 88.7us baseline (-32.8%)
 _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
-    "block_m": 32, "ksplit": 2, "kernelName1": "", "kernelName2": "",
-    "run_1stage": False,
-}
-_CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
-    "run_1stage": False,
-}
-_CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
-    "run_1stage": False,
-}
-_CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
-    "block_m": 64, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M128, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "block_m": 32,
+    "ksplit": 2,
+    "kernelName1": "",
+    "kernelName2": "",
     "run_1stage": False,
 }
 
-# E=257 shapes
+# bs=128/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 (v150)
+# v159: block_m=64 to reduce padding waste with ~3.9 tokens/expert
+_CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
+    "block_m": 64,
+    "ksplit": 0,
+    "kernelName1": "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
+    "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic",
+    "run_1stage": False,
+}
+
+# === E=257 shapes (NEW in v020) ===
+# bs=16/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
+# With 144 token-expert pairs across 257 experts, most experts get 0-1 tokens.
+# Skipping activation quantization + using split-K may help.
 _CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
-    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
+    "block_m": 16,
+    "ksplit": 2,
+    "kernelName1": "",
+    "kernelName2": "",
     "run_1stage": False,
 }
+
+# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
+# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
 _CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
-    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
+    "block_m": 16,
+    "ksplit": 2,
+    "kernelName1": "",
+    "kernelName2": "",
     "run_1stage": False,
 }
+
+# === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===
+# The 256x64x128x128_1x4 kernel uses 4 workgroups per CU for better utilization.
+# v037 showed d=2048: -3.2% (349->338µs). Now also try d=512 with same 4-WG kernel.
+_4WG_STAGE1 = "moe_ck2stages_gemm1_256x64x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
+_4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
+
+_FLYDSL_STAGE2 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x256_atomic"
+_FLYDSL_STAGE2_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"
+_FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
+_FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
+_FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
+
+_CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
+    "block_m": 64,  # v160: was 128, try 64 for better CU distribution
+    "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M128,
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
+    "run_1stage": False,
+}
+
+# === bs=512/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 ===
+# v160: block_m=64 (was 128) for better CU distribution
+_CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
+    "block_m": 64,  # v160: was 128, try 64
+    "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M128,
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=512
+    "run_1stage": False,
+}
+
+# === bs=512/E=257: 4-WG CK stage1 + FlyDSL stage2 ===
+# v144: 4-WG (256x32x128x128_1x4) stage1 + FlyDSL stage2.
+# DSV3 tuned CSV uses 4-WG for token>=64/E=257. Block_m=32 matches CSV.
+_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
-    "block_m": 32, "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M32, "kernelName2": _FLYDSL_STAGE2_M16_K128,
+    "block_m": 32,
+    "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M32,  # v144: 4-WG instead of 1-WG
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v143: FlyDSL stage2
     "run_1stage": False,
     "use_non_temporal_load": True,
 }
-
 
 _injected = False
 
@@ -135,11 +167,14 @@ def _inject_configs():
         dtype, q_dtype_a, q_dtype_w, q_type, use_g1u1,
         activation, doweight_stage1, hidden_pad, intermediate_pad, is_shuffled=True,
     ):
+        # Get the original metadata
         metadata = _original_get_2stage_cfgs(
             token, model_dim, inter_dim, expert, topk,
             dtype, q_dtype_a, q_dtype_w, q_type, use_g1u1,
             activation, doweight_stage1, hidden_pad, intermediate_pad, is_shuffled,
         )
+
+        # Check if this shape has a custom NT setting
         from aiter.jit.utils.chip_info import get_cu_num
         cu_num = get_cu_num()
         keys = (
@@ -150,6 +185,7 @@ def _inject_configs():
         cfg = _fused_moe_module.cfg_2stages.get(keys)
         if cfg and cfg.get("use_non_temporal_load") is not None:
             nt = cfg["use_non_temporal_load"]
+            # Rebuild stage1 partial with NT override
             old_s1 = metadata.stage1
             if hasattr(old_s1, 'func') and old_s1.func is not None:
                 if 'use_non_temporal_load' in (old_s1.keywords or {}):
@@ -164,6 +200,7 @@ def _inject_configs():
                         metadata.has_bias,
                         nt,
                     )
+                    # Also patch stage2 if it's a CK kernel (not FlyDSL)
                     old_s2 = metadata.stage2
                     if old_s2 and hasattr(old_s2, 'keywords') and 'use_non_temporal_load' in (old_s2.keywords or {}):
                         new_kw2 = dict(old_s2.keywords)
@@ -182,139 +219,6 @@ def _inject_configs():
     _fused_moe_module.get_2stage_cfgs = _patched_get_2stage_cfgs
 
 
-# ============================================================
-# Cached execution plan: build once per shape, reuse forever
-# ============================================================
-_plan_cache = {}
-
-
-def _build_quant_constants(M, N, sorted_ids_len):
-    """Pre-compute quant kernel launch constants."""
-    MXFP4_QUANT_BLOCK_SIZE = 32
-    BLOCK_SIZE_Mx = 128
-    BLOCK_SIZE_M = 32
-    BLOCK_SIZE_N = 8
-    BLOCK_SIZE_M_u32 = 16
-    BLOCK_SIZE_N_u32 = 4
-
-    scaleN = triton.cdiv(N, MXFP4_QUANT_BLOCK_SIZE)
-    M_o = sorted_ids_len
-    num_pid = triton.cdiv(M, BLOCK_SIZE_Mx) * scaleN + triton.cdiv(
-        M_o, BLOCK_SIZE_M
-    ) * triton.cdiv(scaleN, BLOCK_SIZE_N)
-
-    x_fp4 = torch.empty((M, N // 2), dtype=torch.uint8, device="cuda")
-    blockscale = torch.empty(
-        (
-            triton.cdiv(M_o, BLOCK_SIZE_M),
-            triton.cdiv(scaleN, BLOCK_SIZE_N),
-            BLOCK_SIZE_N_u32,
-            BLOCK_SIZE_M_u32,
-            4,
-        ),
-        dtype=torch.uint8,
-        device="cuda",
-    )
-    return {
-        "x_fp4": x_fp4,
-        "blockscale": blockscale,
-        "scaleN": scaleN,
-        "num_pid": num_pid,
-        "M": M,
-        "N": N,
-        "M_i": M,
-        "N_i": scaleN,
-    }
-
-
-def _run_quant(qc, x, sorted_ids, num_valid_ids, token_num, topk):
-    """Run quant kernel using pre-computed constants and buffers."""
-    x_fp4 = qc["x_fp4"]
-    blockscale = qc["blockscale"]
-
-    _fused_dynamic_mxfp4_quant_moe_sort_kernel[(qc["num_pid"],)](
-        x,
-        x_fp4,
-        sorted_ids,
-        num_valid_ids,
-        blockscale,
-        qc["M"],
-        qc["N"],
-        qc["scaleN"],
-        *x.stride(),
-        *x_fp4.stride(),
-        *blockscale.stride(),
-        token_num=token_num,
-        M_i=qc["M_i"],
-        N_i=qc["N_i"],
-        MXFP4_QUANT_BLOCK_SIZE=32,
-        BLOCK_SIZE_Mx=128,
-        BLOCK_SIZE_M=16,
-        BLOCK_SIZE_N=4,
-        TOPK=topk,
-    )
-
-    return (
-        x_fp4.view(dtypes.fp4x2),
-        blockscale.view(dtypes.fp8_e8m0).view(-1, qc["scaleN"]),
-    )
-
-
-def _build_plan(M, E, topk, model_dim, inter_dim, hidden_pad, intermediate_pad, device):
-    """Build execution plan with all buffers and metadata pre-resolved."""
-    _inject_configs()
-
-    padded_M = get_padded_M(M)
-    metadata = get_2stage_cfgs(
-        padded_M, model_dim, inter_dim, E, topk,
-        torch.bfloat16, dtypes.fp4x2, dtypes.fp4x2,
-        QuantType.per_1x32, True, ActivationType.Silu,
-        False, hidden_pad, intermediate_pad, True,
-    )
-
-    block_size_M = int(metadata.block_m)
-    is_ksplit = metadata.ksplit > 1
-    stage1 = metadata.stage1
-    stage2 = metadata.stage2
-
-    # Pre-allocate sorting buffers
-    max_num_tokens_padded = int(M * topk + E * block_size_M - topk)
-    max_num_m_blocks = int((max_num_tokens_padded + block_size_M - 1) // block_size_M)
-
-    sorted_ids = torch.empty(max_num_tokens_padded, dtype=dtypes.i32, device=device)
-    sorted_weights = torch.empty(max_num_tokens_padded, dtype=dtypes.fp32, device=device)
-    sorted_expert_ids = torch.empty(max_num_m_blocks, dtype=dtypes.i32, device=device)
-    num_valid_ids = torch.empty(2, dtype=dtypes.i32, device=device)
-    moe_buf = torch.empty((M, model_dim), dtype=torch.bfloat16, device=device)
-
-    # Pre-allocate a2 buffer
-    a2_buf = torch.empty((M, topk, inter_dim), dtype=torch.bfloat16, device=device)
-
-    plan = {
-        "block_size_M": block_size_M,
-        "is_ksplit": is_ksplit,
-        "stage1": stage1,
-        "stage2": stage2,
-        "sorted_ids": sorted_ids,
-        "sorted_weights": sorted_weights,
-        "sorted_expert_ids": sorted_expert_ids,
-        "num_valid_ids": num_valid_ids,
-        "moe_buf": moe_buf,
-        "a2_buf": a2_buf,
-        "E": E,
-        "M": M,
-        "topk": topk,
-    }
-
-    if not is_ksplit:
-        # Pre-compute quant constants for stage1 (input quant)
-        plan["qc1"] = _build_quant_constants(M, model_dim, max_num_tokens_padded)
-        # Pre-compute quant constants for inter-stage (a2 quant)
-        plan["qc2"] = _build_quant_constants(M * topk, inter_dim, max_num_tokens_padded)
-
-    return plan
-
-
 def custom_kernel(data: input_t) -> output_t:
     (
         hidden_states, gate_up_weight, down_weight,
@@ -324,90 +228,20 @@ def custom_kernel(data: input_t) -> output_t:
         topk_weights, topk_ids, config,
     ) = data
 
-    M = hidden_states.shape[0]
-    topk = topk_ids.shape[1]
-    device = topk_ids.device
-    w1 = gate_up_weight_shuffled
-    w2 = down_weight_shuffled
+    _inject_configs()
 
-    # Fast shape key for plan cache
-    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
-    plan_key = (M, E, inter_dim)
+    hidden_pad = config["d_hidden_pad"] - config["d_hidden"]
+    intermediate_pad = config["d_expert_pad"] - config["d_expert"]
 
-    plan = _plan_cache.get(plan_key)
-    if plan is None:
-        hidden_pad = config["d_hidden_pad"] - config["d_hidden"]
-        intermediate_pad = config["d_expert_pad"] - config["d_expert"]
-        plan = _build_plan(M, E, topk, model_dim, inter_dim, hidden_pad, intermediate_pad, device)
-        _plan_cache[plan_key] = plan
-
-    # Extract pre-resolved plan components (local vars for speed)
-    sorted_ids = plan["sorted_ids"]
-    sorted_weights = plan["sorted_weights"]
-    sorted_expert_ids = plan["sorted_expert_ids"]
-    num_valid_ids = plan["num_valid_ids"]
-    moe_out = plan["moe_buf"]
-    block_size_M = plan["block_size_M"]
-    stage1 = plan["stage1"]
-    stage2 = plan["stage2"]
-
-    aiter.moe_sorting_fwd(
-        topk_ids, topk_weights,
-        sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_out,
-        E, block_size_M, None, None, 0,
+    output = fused_moe(
+        hidden_states, gate_up_weight_shuffled, down_weight_shuffled,
+        topk_weights, topk_ids,
+        expert_mask=None, activation=ActivationType.Silu,
+        quant_type=QuantType.per_1x32, doweight_stage1=False,
+        w1_scale=gate_up_weight_scale_shuffled,
+        w2_scale=down_weight_scale_shuffled,
+        a1_scale=None, a2_scale=None,
+        hidden_pad=hidden_pad, intermediate_pad=intermediate_pad,
     )
 
-    w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
-    w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
-
-    if plan["is_ksplit"]:
-        # cktile_moe path: bf16 activations, no fp4 quant
-        a2 = stage1(
-            hidden_states, w1, w2,
-            sorted_ids, sorted_expert_ids, num_valid_ids,
-            plan["a2_buf"], topk,
-            block_m=block_size_M,
-            a1_scale=None,
-            w1_scale=w1_scale_view,
-            sorted_weights=None,
-        )
-
-        stage2(
-            a2, w1, w2,
-            sorted_ids, sorted_expert_ids, num_valid_ids,
-            moe_out, topk,
-            w2_scale=w2_scale_view,
-            a2_scale=None,
-            block_m=block_size_M,
-            sorted_weights=sorted_weights,
-        )
-    else:
-        # CK 2-stage path: fp4 activation quant with pre-allocated buffers
-        a1, a1_scale = _run_quant(plan["qc1"], hidden_states, sorted_ids, num_valid_ids, M, 1)
-
-        a2 = stage1(
-            a1, w1, w2,
-            sorted_ids, sorted_expert_ids, num_valid_ids,
-            plan["a2_buf"], topk,
-            block_m=block_size_M,
-            a1_scale=a1_scale,
-            w1_scale=w1_scale_view,
-            sorted_weights=None,
-        )
-
-        # Inter-stage requant: bf16 -> fp4
-        a2_flat = a2.view(-1, inter_dim)
-        a2_quant, a2_scale = _run_quant(plan["qc2"], a2_flat, sorted_ids, num_valid_ids, M, topk)
-        a2_quant = a2_quant.view(M, topk, -1)
-
-        stage2(
-            a2_quant, w1, w2,
-            sorted_ids, sorted_expert_ids, num_valid_ids,
-            moe_out, topk,
-            w2_scale=w2_scale_view,
-            a2_scale=a2_scale,
-            block_m=block_size_M,
-            sorted_weights=sorted_weights,
-        )
-
-    return moe_out
+    return output

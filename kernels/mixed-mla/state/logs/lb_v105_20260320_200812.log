@@ -5,45 +5,45 @@ File: best_submission.py
 
 Waiting for results...
 {"status": "processing", "elapsed_time": 0.0}
-{"status": "processing", "elapsed_time": 15.05}
-{"status": "processing", "elapsed_time": 30.05}
-{"status": "processing", "elapsed_time": 45.05}
-{"status": "processing", "elapsed_time": 61.0}
-{"status": "processing", "elapsed_time": 76.0}
-{"status": "processing", "elapsed_time": 91.0}
-{"status": "processing", "elapsed_time": 106.0}
-{"status": "processing", "elapsed_time": 121.0}
-{"status": "processing", "elapsed_time": 136.47}
-{"status": "processing", "elapsed_time": 151.47}
-{"status": "processing", "elapsed_time": 166.47}
-{"status": "processing", "elapsed_time": 181.47}
-{"status": "processing", "elapsed_time": 196.47}
-{"status": "processing", "elapsed_time": 212.42}
-{"status": "processing", "elapsed_time": 227.42}
-{"status": "processing", "elapsed_time": 242.42}
-{"status": "processing", "elapsed_time": 258.25}
-{"status": "processing", "elapsed_time": 274.15}
-{"status": "processing", "elapsed_time": 289.15}
-{"status": "processing", "elapsed_time": 304.15}
-{"status": "processing", "elapsed_time": 319.15}
-{"status": "processing", "elapsed_time": 334.15}
-{"status": "processing", "elapsed_time": 349.46}
-{"status": "processing", "elapsed_time": 364.46}
-{"status": "processing", "elapsed_time": 379.58}
-{"status": "processing", "elapsed_time": 395.55}
-{"status": "processing", "elapsed_time": 410.55}
-{"status": "processing", "elapsed_time": 425.55}
+{"status": "processing", "elapsed_time": 15.0}
+{"status": "processing", "elapsed_time": 30.0}
+{"status": "processing", "elapsed_time": 45.0}
+{"status": "processing", "elapsed_time": 60.0}
+{"status": "processing", "elapsed_time": 75.02}
+{"status": "processing", "elapsed_time": 93.37}
+{"status": "processing", "elapsed_time": 108.38}
+{"status": "processing", "elapsed_time": 123.38}
+{"status": "processing", "elapsed_time": 138.38}
+{"status": "processing", "elapsed_time": 154.15}
+{"status": "processing", "elapsed_time": 169.15}
+{"status": "processing", "elapsed_time": 184.15}
+{"status": "processing", "elapsed_time": 199.56}
+{"status": "processing", "elapsed_time": 215.56}
+{"status": "processing", "elapsed_time": 230.56}
+{"status": "processing", "elapsed_time": 245.56}
+{"status": "processing", "elapsed_time": 260.57}
+{"status": "processing", "elapsed_time": 275.57}
+{"status": "processing", "elapsed_time": 290.57}
+{"status": "processing", "elapsed_time": 305.57}
+{"status": "processing", "elapsed_time": 320.57}
+{"status": "processing", "elapsed_time": 336.53}
+{"status": "processing", "elapsed_time": 351.53}
+{"status": "processing", "elapsed_time": 366.53}
+{"status": "processing", "elapsed_time": 381.53}
+{"status": "processing", "elapsed_time": 396.54}
+{"status": "processing", "elapsed_time": 411.54}
+{"status": "processing", "elapsed_time": 426.54}
+{"status": "processing", "elapsed_time": 441.54}
+{"status": "processing", "elapsed_time": 456.54}
 STDOUT (Run 1):
-[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16.co GetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E
-[aiter] hipModuleGetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E Success
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_dec_stage1_bf16_a16w16_subQ16_mqa16.co GetFunction: _ZN5aiter39mla_dec_stage1_bf16_a16w16_subQ16_mqa16E
+[aiter] hipModuleGetFunction: _ZN5aiter39mla_dec_stage1_bf16_a16w16_subQ16_mqa16E Success
 [aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16_ps.co GetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE
 [aiter] hipModuleGetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE Success
 
 STDERR (Run 1):
 [aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
 [aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
-[aiter] import [module_quant] under /home/runner/aiter/aiter/jit/module_quant.so
-[aiter] type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
 [aiter] import [module_mla_asm] under /home/runner/aiter/aiter/jit/module_mla_asm.so
 [aiter] type hints mismatch, override to --> mla_decode_stage1_asm_fwd(Q: torch.Tensor, KV: torch.Tensor, qo_indptr: torch.Tensor, kv_indptr: torch.Tensor, kv_page_indices: torch.Tensor, kv_last_page_lens: torch.Tensor, num_kv_splits_indptr: Optional[torch.Tensor], work_meta_data: Optional[torch.Tensor], work_indptr: Optional[torch.Tensor], work_info_set: Optional[torch.Tensor], max_seqlen_q: int | typing.SupportsIndex, page_size: int | typing.SupportsIndex, nhead_kv: int | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, splitData: torch.Tensor, splitLse: torch.Tensor, output: torch.Tensor, q_scale: Optional[torch.Tensor] = None, kv_scale: Optional[torch.Tensor] = None) -> None
 [aiter] import [module_mla_metadata] under /home/runner/aiter/aiter/jit/module_mla_metadata.so
@@ -52,16 +52,14 @@ STDERR (Run 1):
 [aiter] type hints mismatch, override to --> mla_reduce_v1(partial_output: torch.Tensor, partial_lse: torch.Tensor, reduce_indptr: torch.Tensor, reduce_final_map: Optional[torch.Tensor], reduce_partial_map: torch.Tensor, max_seqlen_q: int | typing.SupportsIndex, final_output: torch.Tensor, final_lse: Optional[torch.Tensor] = None) -> None
 
 STDOUT (Run 2):
-[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16.co GetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E
-[aiter] hipModuleGetFunction: _ZN5aiter33mla_a8w8_qh16_qseqlen1_gqaratio16E Success
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_dec_stage1_bf16_a16w16_subQ16_mqa16.co GetFunction: _ZN5aiter39mla_dec_stage1_bf16_a16w16_subQ16_mqa16E
+[aiter] hipModuleGetFunction: _ZN5aiter39mla_dec_stage1_bf16_a16w16_subQ16_mqa16E Success
 [aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/mla/mla_a8w8_qh16_qseqlen1_gqaratio16_ps.co GetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE
 [aiter] hipModuleGetFunction: _ZN5aiter36mla_a8w8_qh16_qseqlen1_gqaratio16_psE Success
 
 STDERR (Run 2):
 [aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
 [aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
-[aiter] import [module_quant] under /home/runner/aiter/aiter/jit/module_quant.so
-[aiter] type hints mismatch, override to --> dynamic_per_tensor_quant(arg0: torch.Tensor, arg1: torch.Tensor, arg2: torch.Tensor) -> None
 [aiter] import [module_mla_asm] under /home/runner/aiter/aiter/jit/module_mla_asm.so
 [aiter] type hints mismatch, override to --> mla_decode_stage1_asm_fwd(Q: torch.Tensor, KV: torch.Tensor, qo_indptr: torch.Tensor, kv_indptr: torch.Tensor, kv_page_indices: torch.Tensor, kv_last_page_lens: torch.Tensor, num_kv_splits_indptr: Optional[torch.Tensor], work_meta_data: Optional[torch.Tensor], work_indptr: Optional[torch.Tensor], work_info_set: Optional[torch.Tensor], max_seqlen_q: int | typing.SupportsIndex, page_size: int | typing.SupportsIndex, nhead_kv: int | typing.SupportsIndex, softmax_scale: float | typing.SupportsIndex, splitData: torch.Tensor, splitLse: torch.Tensor, output: torch.Tensor, q_scale: Optional[torch.Tensor] = None, kv_scale: Optional[torch.Tensor] = None) -> None
 [aiter] import [module_mla_metadata] under /home/runner/aiter/aiter/jit/module_mla_metadata.so
@@ -71,11 +69,11 @@ STDERR (Run 2):
 
 
 "**MI355X on GitHub ✅ success**
-> Workflow [23358304207](<https://github.com/gpu-mode/kernelbot/actions/runs/23358304207>) completed
+> Workflow [23360617516](<https://github.com/gpu-mode/kernelbot/actions/runs/23360617516>) completed
 > Downloading artifacts... done
 > ✅ Testing successful
 > ✅ Benchmarking successful
-> ❌ Leaderboard run failed
+> ✅ Leaderboard run successful
 
 Running on:
 * GPU: `AMD Instinct MI355X`
@@ -84,92 +82,92 @@ Running on:
 * Runtime: `ROCm`
 * Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
 * Torch: `2.10.0+rocm7.1`
-* Hostname: `arc-runner-set-h82gb-runner-rrf2k`
+* Hostname: `arc-runner-set-h82gb-runner-k8jxk`
 
 
 ## ✅ Passed 4/4 tests:
 ```
 ✅ seed: 4220; qseqlen: 1; kvseqlen: 1024; batchsize: 4
-> Maximum error: 0.01708984375
+> Maximum error: 0.021484375
 ✅ seed: 5412; qseqlen: 1; kvseqlen: 1024; batchsize: 32
-> Maximum error: 0.018310546875
+> Maximum error: 0.0185546875
 ✅ seed: 1360; qseqlen: 1; kvseqlen: 8192; batchsize: 64
-> Maximum error: 0.0166015625
+> Maximum error: 0.009765625
 ✅ seed: 9826; qseqlen: 1; kvseqlen: 8192; batchsize: 256
-> Maximum error: 0.017578125```
+> Maximum error: 0.0107421875```
 
 ## Benchmarks:
 ```
 seed: 4217; qseqlen: 1; kvseqlen: 1024; batchsize: 4
- ⏱ 25.4 ± 0.03 µs
- ⚡ 24.6 µs 🐌 30.3 µs
+ ⏱ 20.2 ± 0.02 µs
+ ⚡ 19.6 µs 🐌 25.3 µs
 
 seed: 4220; qseqlen: 1; kvseqlen: 8192; batchsize: 4
- ⏱ 36.8 ± 0.04 µs
- ⚡ 35.8 µs 🐌 43.3 µs
+ ⏱ 35.4 ± 0.04 µs
+ ⚡ 34.4 µs 🐌 39.2 µs
 
 seed: 5412; qseqlen: 1; kvseqlen: 1024; batchsize: 32
- ⏱ 36.6 ± 0.04 µs
- ⚡ 35.4 µs 🐌 41.0 µs
+ ⏱ 30.3 ± 0.03 µs
+ ⚡ 28.4 µs 🐌 35.6 µs
 
 seed: 5415; qseqlen: 1; kvseqlen: 8192; batchsize: 32
- ⏱ 84.6 ± 0.08 µs
- ⚡ 81.0 µs 🐌 93.6 µs
+ ⏱ 119 ± 0.1 µs
+ ⚡ 113 µs 🐌 130 µs
 
 seed: 1357; qseqlen: 1; kvseqlen: 1024; batchsize: 64
- ⏱ 47.5 ± 0.05 µs
- ⚡ 45.9 µs 🐌 51.7 µs
+ ⏱ 42.1 ± 0.05 µs
+ ⚡ 39.9 µs 🐌 49.2 µs
 
 seed: 1360; qseqlen: 1; kvseqlen: 8192; batchsize: 64
- ⏱ 139 ± 0.1 µs
- ⚡ 131 µs 🐌 153 µs
+ ⏱ 169 ± 0.2 µs
+ ⚡ 159 µs 🐌 188 µs
 
 seed: 9823; qseqlen: 1; kvseqlen: 1024; batchsize: 256
- ⏱ 122 ± 0.1 µs
- ⚡ 117 µs 🐌 128 µs
+ ⏱ 121 ± 0.1 µs
+ ⚡ 115 µs 🐌 136 µs
 
 seed: 9826; qseqlen: 1; kvseqlen: 8192; batchsize: 256
- ⏱ 319 ± 0.3 µs
- ⚡ 307 µs 🐌 338 µs
+ ⏱ 469 ± 0.5 µs
+ ⚡ 452 µs 🐌 500 µs
 ```
 
 ## Ranked Benchmark:
 ```
 seed: 4217; qseqlen: 1; kvseqlen: 1024; batchsize: 4
- ⏱ 27.7 ± 0.06 µs
- ⚡ 27.0 µs 🐌 31.6 µs
+ ⏱ 21.6 ± 0.07 µs
+ ⚡ 20.9 µs 🐌 26.2 µs
 
-❌ seed: 4220; qseqlen: 1; kvseqlen: 8192; batchsize: 4 failed testing:
+seed: 4220; qseqlen: 1; kvseqlen: 8192; batchsize: 4
+ ⏱ 35.4 ± 0.07 µs
+ ⚡ 34.6 µs 🐌 40.3 µs
 
-Number of mismatched elements: 1955\
-ERROR at (3, 3, 1): 0.09033203125 -0.06396484375\
-ERROR at (3, 3, 2): 0.478515625 0.10400390625\
-ERROR at (3, 3, 3): -0.234375 -0.04931640625\
-ERROR at (3, 3, 5): -0.193359375 -0.05419921875\
-ERROR at (3, 3, 6): 0.1728515625 -0.1455078125\
-... and 1950 more mismatched elements.
+seed: 5412; qseqlen: 1; kvseqlen: 1024; batchsize: 32
+ ⏱ 30.8 ± 0.08 µs
+ ⚡ 29.5 µs 🐌 33.6 µs
 
-None
- ⏱ –
+seed: 5415; qseqlen: 1; kvseqlen: 8192; batchsize: 32
+ ⏱ 117 ± 0.3 µs
+ ⚡ 113 µs 🐌 128 µs
 
-None
- ⏱ –
+seed: 1357; qseqlen: 1; kvseqlen: 1024; batchsize: 64
+ ⏱ 42.8 ± 0.14 µs
+ ⚡ 40.5 µs 🐌 47.6 µs
 
-None
- ⏱ –
+seed: 1360; qseqlen: 1; kvseqlen: 8192; batchsize: 64
+ ⏱ 169 ± 0.4 µs
+ ⚡ 160 µs 🐌 181 µs
 
-None
- ⏱ –
+seed: 9823; qseqlen: 1; kvseqlen: 1024; batchsize: 256
+ ⏱ 121 ± 0.4 µs
+ ⚡ 116 µs 🐌 132 µs
 
-None
- ⏱ –
-
-None
- ⏱ –
+seed: 9826; qseqlen: 1; kvseqlen: 8192; batchsize: 256
+ ⏱ 468 ± 0.8 µs
+ ⚡ 454 µs 🐌 491 µs
 ```","**MI355X on GitHub (secret) ✅ success**
-> Workflow [23358304391](<https://github.com/gpu-mode/kernelbot/actions/runs/23358304391>) completed
+> Workflow [23360617777](<https://github.com/gpu-mode/kernelbot/actions/runs/23360617777>) completed
 > Downloading artifacts... done
 > ✅ Testing successful
 > ✅ Benchmarking successful
-> ❌ Leaderboard run failed
+> ✅ Leaderboard run successful
 "

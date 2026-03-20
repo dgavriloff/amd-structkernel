@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v211: M<=32 K<=1024 cache_modifier=None (from .cg).
-
-For K=512 BSM=8 BSN=128 BSK=256, B data per block is 32KB FP4.
-Without .cg, L1 caching improves latency for 2 K-iterations.
-AMD library default uses null for this config.
+v241: M=64 two-phase: quant + _gemm_afp4wfp4_preshuffle_kernel (A4W4
+preshuffle with XCD remapping) instead of fused _gemm_a16wfp4_preshuffle.
+A4W4 preshuffle kernel has remap_xcd for 8 XCDs, .wt output stores,
+no in-loop quant overhead. For 64x7168x2048: quant is fast (64 rows),
+XCD remap distributes 224 blocks across 8 XCDs for better L2 locality.
 """
 import torch
 import triton
@@ -22,6 +22,7 @@ from aiter.ops.triton.gluon.gemm_afp4wfp4 import (
 )
 from aiter.ops.triton._triton_kernels.gemm.basic.gemm_afp4wfp4 import (
     _gemm_afp4wfp4_reduce_kernel,
+    _gemm_afp4wfp4_preshuffle_kernel,
 )
 from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import get_splitk
 
@@ -33,8 +34,10 @@ _buffers = {}
 # ASM kernel name — 32x128 is optimal for all small-M shapes per tuned CSV analysis
 _ASM_KERNEL_32x128 = "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E"
 
-# Threshold: use fused for M <= this value
-_FUSED_M_THRESHOLD = 64
+# Threshold: use fused A16WFP4 for M <= this value (M=64 uses A4W4 preshuffle)
+_FUSED_M_THRESHOLD = 32
+# M=64 uses two-phase: quant + A4W4 preshuffle GEMM (with XCD remapping)
+_A4W4_PRESHUFFLE_M_THRESHOLD = 64
 
 
 def _get_fused_config(M, N, K):
@@ -83,7 +86,10 @@ def _get_fused_config(M, N, K):
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
         }
-    elif M <= 32 and K <= 1024:
+    elif M <= 32:
+        # Unified config for all M<=32 shapes (K<=1024 and K>1024)
+        # BSM=8 gives 4 M-tiles for M=32, BSN=128 for wide N coverage
+        # cache=None allows L1 caching of B tiles across K-iterations
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -96,23 +102,8 @@ def _get_fused_config(M, N, K):
             "cache_modifier": None,
             "NUM_KSPLIT": 1,
         }
-    elif M <= 32:
-        return {
-            "BLOCK_SIZE_M": 32,
-            "BLOCK_SIZE_N": 64,
-            "BLOCK_SIZE_K": 512,
-            "GROUP_SIZE_M": 1,
-            "num_warps": 8,
-            "num_stages": 1,
-            "waves_per_eu": 2,
-            "matrix_instr_nonkdim": 16,
-            "cache_modifier": None,
-            "NUM_KSPLIT": 1,
-        }
     else:
-        # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
-        # 4*56=224 blocks, 8 K-iters with pipelining
-        # waves_per_eu=2: hint for higher occupancy per EU
+        # Fallback (shouldn't be reached, M=64 uses a4w4_preshuffle)
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
@@ -122,7 +113,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": ".cg",
+            "cache_modifier": None,
             "NUM_KSPLIT": 1,
         }
 
@@ -225,8 +216,95 @@ def _fused_mxfp4_quant_shuffle_kernel(
             bs_ptr + bs_offs,
             bs_e8m0.to(tl.uint8),
             mask=bs_mask,
-            cache_modifier=".cg",
+            cache_modifier=".wt",
         )
+
+
+@triton.heuristics(
+    {
+        "EVEN_M_N": lambda args: args["M"] % args["BLOCK_SIZE_M"] == 0
+        and args["N"] % (args["BLOCK_SIZE_N"] * args["NUM_ITER"]) == 0,
+    }
+)
+@triton.jit
+def _mxfp4_quant_noshuffle_kernel(
+    x_ptr,
+    x_fp4_ptr,
+    bs_ptr,
+    stride_x_m_in,
+    stride_x_n_in,
+    stride_x_fp4_m_in,
+    stride_x_fp4_n_in,
+    stride_bs_m_in,
+    stride_bs_n_in,
+    M,
+    N,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    NUM_ITER: tl.constexpr,
+    NUM_STAGES: tl.constexpr,
+    MXFP4_QUANT_BLOCK_SIZE: tl.constexpr,
+    EVEN_M_N: tl.constexpr,
+    SCALING_MODE: tl.constexpr,
+):
+    """Quant kernel that produces NON-shuffled scales (M x K/32 layout)."""
+    pid_m = tl.program_id(0)
+    start_n = tl.program_id(1) * NUM_ITER
+    stride_x_m = tl.cast(stride_x_m_in, tl.int64)
+    stride_x_n = tl.cast(stride_x_n_in, tl.int64)
+    stride_x_fp4_m = tl.cast(stride_x_fp4_m_in, tl.int64)
+    stride_x_fp4_n = tl.cast(stride_x_fp4_n_in, tl.int64)
+    stride_bs_m = tl.cast(stride_bs_m_in, tl.int64)
+    stride_bs_n = tl.cast(stride_bs_n_in, tl.int64)
+
+    NUM_QUANT_BLOCKS: tl.constexpr = BLOCK_SIZE_N // MXFP4_QUANT_BLOCK_SIZE
+
+    for pid_n in tl.range(start_n, min(start_n + NUM_ITER, N), num_stages=NUM_STAGES):
+        x_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        x_offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
+
+        if EVEN_M_N:
+            x = tl.load(x_ptr + x_offs, cache_modifier=".cg").to(tl.float32)
+        else:
+            x_mask = (x_offs_m < M)[:, None] & (x_offs_n < N)[None, :]
+            x = tl.load(x_ptr + x_offs, mask=x_mask, cache_modifier=".cg").to(
+                tl.float32
+            )
+
+        out_tensor, bs_e8m0 = _mxfp4_quant_op(
+            x, BLOCK_SIZE_N, BLOCK_SIZE_M, MXFP4_QUANT_BLOCK_SIZE
+        )
+
+        # Store fp4 output
+        out_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        out_offs_n = pid_n * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
+        out_offs = (
+            out_offs_m[:, None] * stride_x_fp4_m + out_offs_n[None, :] * stride_x_fp4_n
+        )
+
+        if EVEN_M_N:
+            tl.store(x_fp4_ptr + out_offs, out_tensor, cache_modifier=".wt")
+        else:
+            out_mask = (out_offs_m < M)[:, None] & (out_offs_n < (N // 2))[None, :]
+            tl.store(x_fp4_ptr + out_offs, out_tensor, mask=out_mask, cache_modifier=".wt")
+
+        # Store scales WITHOUT shuffle — simple (M, K/32) layout
+        bs_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        bs_offs_n = pid_n * NUM_QUANT_BLOCKS + tl.arange(0, NUM_QUANT_BLOCKS)
+        num_bs_cols = (N + MXFP4_QUANT_BLOCK_SIZE - 1) // MXFP4_QUANT_BLOCK_SIZE
+        bs_offs = bs_offs_m[:, None] * stride_bs_m + bs_offs_n[None, :] * stride_bs_n
+
+        if EVEN_M_N:
+            tl.store(bs_ptr + bs_offs, bs_e8m0.to(tl.uint8), cache_modifier=".wt")
+        else:
+            bs_mask = (bs_offs_m < M)[:, None] & (bs_offs_n < num_bs_cols)[None, :]
+            tl.store(
+                bs_ptr + bs_offs,
+                bs_e8m0.to(tl.uint8),
+                mask=bs_mask,
+                cache_modifier=".wt",
+            )
 
 
 def _prepare_splitk_dispatch(M, N, K, config, device):
@@ -319,6 +397,61 @@ def _get_or_create_buffers(M, K, N, device):
                     'matrix_instr_nonkdim': config["matrix_instr_nonkdim"],
                     'cache_modifier': config["cache_modifier"],
                 }
+        elif M <= _A4W4_PRESHUFFLE_M_THRESHOLD:
+            # M=64: two-phase with A4W4 preshuffle GEMM (has XCD remapping)
+            MXFP4_QUANT_BLOCK_SIZE = 32
+            num_scale_cols = triton.cdiv(K, MXFP4_QUANT_BLOCK_SIZE)
+
+            # Quant kernel config
+            QUANT_BSM = min(32, triton.next_power_of_2(M))
+            QUANT_BSN = 64
+            QUANT_NUM_ITER = 1
+            QUANT_NUM_STAGES = 1
+            QUANT_NUM_WARPS = 2
+            QUANT_BSM = triton.cdiv(QUANT_BSM, 32) * 32
+            QUANT_BSN = triton.cdiv(QUANT_BSN, 32) * 32
+            quant_grid = (
+                triton.cdiv(M, QUANT_BSM),
+                triton.cdiv(K, QUANT_BSN * QUANT_NUM_ITER),
+            )
+
+            # A4W4 preshuffle GEMM config (same tile sizes as fused M=64)
+            K_kernel = K // 2
+            BSM = 16
+            BSN = 128
+            BSK = 256
+            SPLITK_BLOCK_SIZE = 2 * K_kernel
+            grid_size = triton.cdiv(M, BSM) * triton.cdiv(N, BSN)
+
+            _buffers[key] = {
+                'mode': 'a4w4_preshuffle',
+                'out': torch.empty((M, N), dtype=torch.bfloat16, device=device),
+                'x_fp4': torch.empty((M, K // 2), dtype=torch.uint8, device=device),
+                'a_scale': torch.empty((M, num_scale_cols), dtype=torch.uint8, device=device),
+                'B_w': None,
+                'B_sc': None,
+                # Quant params
+                'quant_grid': quant_grid,
+                'QUANT_BSM': QUANT_BSM,
+                'QUANT_BSN': QUANT_BSN,
+                'QUANT_NUM_ITER': QUANT_NUM_ITER,
+                'QUANT_NUM_STAGES': QUANT_NUM_STAGES,
+                'QUANT_NUM_WARPS': QUANT_NUM_WARPS,
+                # GEMM params
+                'grid_size': grid_size,
+                'K_kernel': K_kernel,
+                'BLOCK_SIZE_M': BSM,
+                'BLOCK_SIZE_N': BSN,
+                'BLOCK_SIZE_K': BSK,
+                'SPLITK_BLOCK_SIZE': SPLITK_BLOCK_SIZE,
+                'GROUP_SIZE_M': 1,
+                'NUM_KSPLIT': 1,
+                'num_warps': 4,
+                'num_stages': 2,
+                'waves_per_eu': 2,
+                'matrix_instr_nonkdim': 16,
+                'cache_modifier': None,
+            }
         else:
             MXFP4_QUANT_BLOCK_SIZE = 32
             SCALE_N_valid = triton.cdiv(K, MXFP4_QUANT_BLOCK_SIZE)
@@ -470,6 +603,78 @@ def custom_kernel(data: input_t) -> output_t:
             waves_per_eu=buf['waves_per_eu'],
             matrix_instr_nonkdim=buf['matrix_instr_nonkdim'],
             PREQUANT=True,
+            cache_modifier=buf['cache_modifier'],
+        )
+
+        return out
+
+    elif buf['mode'] == 'a4w4_preshuffle':
+        # M=64: two-phase with A4W4 preshuffle GEMM (XCD remapping)
+        # Step 1: Quantize A to FP4 + non-shuffled scales
+        _mxfp4_quant_noshuffle_kernel[buf['quant_grid']](
+            A,
+            buf['x_fp4'],
+            buf['a_scale'],
+            *A.stride(),
+            *buf['x_fp4'].stride(),
+            buf['a_scale'].stride(0),
+            buf['a_scale'].stride(1),
+            M=M,
+            N=K,
+            BLOCK_SIZE_M=buf['QUANT_BSM'],
+            BLOCK_SIZE_N=buf['QUANT_BSN'],
+            NUM_ITER=buf['QUANT_NUM_ITER'],
+            NUM_STAGES=buf['QUANT_NUM_STAGES'],
+            MXFP4_QUANT_BLOCK_SIZE=32,
+            SCALING_MODE=0,
+            num_warps=buf['QUANT_NUM_WARPS'],
+            waves_per_eu=0,
+            num_stages=1,
+        )
+
+        # Step 2: Reshape B for A4W4 preshuffle kernel
+        b_ptr = B_shuffle.data_ptr()
+        if buf['B_w'] is None or buf.get('_b_ptr') != b_ptr:
+            buf['B_w'] = B_shuffle.view(torch.uint8).reshape(N // 16, (K // 2) * 16)
+            bs_shape = B_scale_sh.shape
+            buf['B_sc'] = B_scale_sh.view(torch.uint8).reshape(
+                bs_shape[0] // 32, bs_shape[1] * 32
+            )
+            buf['_b_ptr'] = b_ptr
+
+        out = buf['out']
+
+        # Step 3: A4W4 preshuffle GEMM with XCD remapping
+        _gemm_afp4wfp4_preshuffle_kernel[(buf['grid_size'],)](
+            buf['x_fp4'],
+            buf['B_w'],
+            out,
+            buf['a_scale'],
+            buf['B_sc'],
+            M,
+            N,
+            buf['K_kernel'],
+            buf['x_fp4'].stride(0),
+            buf['x_fp4'].stride(1),
+            buf['B_w'].stride(0),
+            buf['B_w'].stride(1),
+            0,  # stride_ck (no split-K)
+            out.stride(0),
+            out.stride(1),
+            buf['a_scale'].stride(0),
+            buf['a_scale'].stride(1),
+            buf['B_sc'].stride(0),
+            buf['B_sc'].stride(1),
+            BLOCK_SIZE_M=buf['BLOCK_SIZE_M'],
+            BLOCK_SIZE_N=buf['BLOCK_SIZE_N'],
+            BLOCK_SIZE_K=buf['BLOCK_SIZE_K'],
+            GROUP_SIZE_M=buf['GROUP_SIZE_M'],
+            NUM_KSPLIT=buf['NUM_KSPLIT'],
+            SPLITK_BLOCK_SIZE=buf['SPLITK_BLOCK_SIZE'],
+            num_warps=buf['num_warps'],
+            num_stages=buf['num_stages'],
+            waves_per_eu=buf['waves_per_eu'],
+            matrix_instr_nonkdim=buf['matrix_instr_nonkdim'],
             cache_modifier=buf['cache_modifier'],
         )
 
