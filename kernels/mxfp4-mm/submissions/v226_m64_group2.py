@@ -2,10 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v224: Unify M<=32 K>1024 with K<=1024 config: BSM=8 BSN=128 BSK=256
-NW=4 NS=2 cache=None waves=2. Eliminates BSM=32 BSN=64 BSK=512 NW=8
-NS=1 special case. 2x more blocks (128 vs 64 for M=32 N=4096 K=4096).
-v209 tried .cg (not None). cache=None allows L1 B-tile reuse.
+v226: GROUP_SIZE_M=2 for M=64 fused path (from 1). Pairs of M-tiles
+share B data in L2. v102 tested with .cg, v193 confounded by waves.
+Clean test on current cache=None baseline.
 """
 import torch
 import triton
@@ -102,11 +101,12 @@ def _get_fused_config(M, N, K):
         # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
         # waves_per_eu=2: hint for higher occupancy per EU
+        # GROUP_SIZE_M=2: pair M-tiles to share B data in L2
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 256,
-            "GROUP_SIZE_M": 1,
+            "GROUP_SIZE_M": 2,
             "num_warps": 4,
             "num_stages": 2,
             "waves_per_eu": 2,
