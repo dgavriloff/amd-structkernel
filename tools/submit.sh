@@ -12,7 +12,6 @@ STATE_DIR="$KERNEL_DIR/state"
 BEST_FILE="$STATE_DIR/best.json"
 TRIED_FILE="$STATE_DIR/tried.jsonl"
 SESSIONS_DIR="$STATE_DIR/sessions"
-RATE_FILE="$STATE_DIR/rate_limits.jsonl"
 
 MODE="${1:-}"
 if [ -z "$MODE" ]; then
@@ -41,56 +40,6 @@ if [ ! -f "$SESSION_FILE" ] || ! grep -q '"action": "propose"' "$SESSION_FILE"; 
     exit 1
 fi
 
-# --- Rate limiting ---
-MAX_PER_HOUR=10
-touch "$RATE_FILE"
-
-while true; do
-    NOW=$(date +%s)
-    CUTOFF=$((NOW - 3600))
-
-    COUNT=$(python3 -c "
-import json
-count = 0
-lines = []
-for line in open('$RATE_FILE'):
-    line = line.strip()
-    if not line: continue
-    d = json.loads(line)
-    if d['ts_epoch'] > $CUTOFF:
-        lines.append(line)
-        if d['mode'] == '$MODE':
-            count += 1
-# Prune old entries
-with open('$RATE_FILE', 'w') as f:
-    for l in lines:
-        f.write(l + '\n')
-print(count)
-")
-
-    if [ "$COUNT" -lt "$MAX_PER_HOUR" ]; then
-        break
-    fi
-
-    WAIT=$(python3 -c "
-import json
-now = $(date +%s)
-cutoff = now - 3600
-oldest = None
-for line in open('$RATE_FILE'):
-    line = line.strip()
-    if not line: continue
-    d = json.loads(line)
-    if d['mode'] == '$MODE' and d['ts_epoch'] > cutoff:
-        if oldest is None or d['ts_epoch'] < oldest:
-            oldest = d['ts_epoch']
-wait = (oldest + 3600) - now + 5 if oldest else 60
-print(max(wait, 5))
-")
-    echo "Rate limit hit ($COUNT/$MAX_PER_HOUR $MODE/hr). Waiting ${WAIT}s..."
-    sleep "$WAIT"
-done
-
 # Get the leaderboard name from submission.py
 LEADERBOARD=$(grep '#!POPCORN leaderboard' "$KERNEL_DIR/submission.py" | head -1 | awk '{print $3}')
 if [ -z "$LEADERBOARD" ]; then
@@ -113,13 +62,6 @@ echo "$RESULT"
 LOGS_DIR="$STATE_DIR/logs"
 mkdir -p "$LOGS_DIR"
 echo "$RESULT" > "$LOGS_DIR/v${VERSION}_${MODE}.log"
-
-# Record rate limit entry
-python3 -c "
-import json
-d = {'mode': '$MODE', 'ts_epoch': $(date +%s)}
-print(json.dumps(d))
-" >> "$RATE_FILE"
 
 # Log to session file
 if [ "$MODE" = "test" ]; then
