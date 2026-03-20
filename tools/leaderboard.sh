@@ -51,7 +51,7 @@ fi
 
 # --- Read our last LB score ---
 KERNEL_NAME=$(basename "$(pwd)")
-REPO_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_DIR="$(cd "$(pwd)/../.." && pwd)"
 LB_FILE="$REPO_DIR/state/last_lb.json"
 LB_SCORE=""
 LB_VERSION=""
@@ -148,37 +148,44 @@ lb_score_str = os.environ.get("LB_SCORE", "")
 lb_version = os.environ.get("LB_VERSION", "")
 lb_score = float(lb_score_str) if lb_score_str else None
 
+# LB→BM ratio: LB scores are ~1-5% slower than BM due to recheck overhead.
+# These ratios are from observed submissions. Use to estimate BM targets.
+LB_TO_BM_RATIO = {
+    "MLA Decode": 0.99,     # LB ~1% slower
+    "MXFP4 MoE": 0.986,    # LB ~1.4% slower
+    "MXFP4 GEMM": 0.957,   # LB ~4.5% slower (small kernels, more overhead)
+}
+ratio = LB_TO_BM_RATIO.get(display_name, 0.97)
+
 print()
 print(f"  ┌─ Your scores ──────────────────────────────")
 if best_score is not None:
-    print(f"  │ Best benchmark (BM): v{best_version} @ {best_score:.3f} µs")
+    print(f"  │ Best BM: v{best_version} @ {best_score:.3f} µs")
 else:
-    print(f"  │ Best benchmark (BM): none yet")
+    print(f"  │ Best BM: none yet")
 if lb_score is not None:
-    print(f"  │ Best leaderboard (LB): v{lb_version} @ {lb_score:.3f} µs")
+    print(f"  │ Best LB: v{lb_version} @ {lb_score:.3f} µs")
 else:
-    print(f"  │ Best leaderboard (LB): not yet submitted")
-print(f"  ├─ Competition (LB scores) ──────────────────")
-print(f"  │ #1: {leader_name} @ {leader_score_us:.3f} µs")
+    print(f"  │ Best LB: not yet submitted")
+print(f"  ├─ Competition ──────────────────────────────")
+print(f"  │ #1 LB: {leader_name} @ {leader_score_us:.3f} µs")
+print(f"  │ #1 est. BM: ~{leader_score_us * ratio:.3f} µs  (your BM target)")
 
-# Use LB score for gap if available, otherwise BM
-compare_score = lb_score if lb_score is not None else best_score
-compare_label = "LB" if lb_score is not None else "BM"
-if compare_score is not None:
-    gap = ((compare_score - leader_score_us) / leader_score_us) * 100 if leader_score_us > 0 else 0
+if best_score is not None:
+    gap = ((best_score - leader_score_us * ratio) / (leader_score_us * ratio)) * 100
     our_rank = 1
-    compare_in_seconds = compare_score / 1_000_000
+    best_in_seconds = best_score / 1_000_000 / ratio  # estimate our LB from BM
     for entry in entries:
-        if entry.get("score", 0) < compare_in_seconds:
+        if entry.get("score", 0) < best_in_seconds:
             our_rank += 1
         else:
             break
     if gap > 0:
-        print(f"  │ Gap: +{gap:.1f}% behind #1 (comparing your {compare_label})")
+        print(f"  │ Gap: +{gap:.1f}% behind (BM vs est. BM)")
     elif gap < 0:
-        print(f"  │ Gap: {gap:.1f}% AHEAD of #1! (comparing your {compare_label})")
+        print(f"  │ Gap: {gap:.1f}% AHEAD!")
     else:
-        print(f"  │ Gap: TIED with #1! (comparing your {compare_label})")
+        print(f"  │ Gap: TIED!")
     print(f"  │ Est. rank: #{our_rank} of {total}")
 print(f"  └───────────────────────────────────────────")
 PYEOF
