@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v223: waves_per_eu=0 for M<=32 K>1024 path (from 2).
+v220: cache_modifier=None for M=64 fused path (from .cg).
 
-BSM=32 BSN=64 BSK=512 NW=8 NS=1 path affects M=32 N=4096 K=4096.
-Grid=64 blocks (0.25 waves). Let compiler auto-decide occupancy
-for this unique NW=8 NS=1 config.
+For 64x7168x2048 with BSM=16 BSN=128 BSK=256: B data per block
+is 16KB FP4 per K-iter. Without .cg, L1 caches B tiles across
+4 K-iterations for potential reuse.
 """
 import torch
 import triton
@@ -104,7 +104,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 8,
             "num_stages": 1,
-            "waves_per_eu": 0,
+            "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": None,
             "NUM_KSPLIT": 1,
