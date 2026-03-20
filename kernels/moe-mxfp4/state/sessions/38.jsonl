@@ -15,3 +15,4 @@
 {"action": "submit", "mode": "test", "v": 169, "result": "pass", "ts": "2026-03-20T15:19:45.669670+00:00Z"}
 {"action": "submit", "mode": "benchmark", "v": 169, "score": 125.398, "best": 122.404, "kept": false, "ts": "2026-03-20T15:28:07.744364+00:00Z"}
 {"action": "propose", "what": "Use M64 stage1 kernel (256x64x128x128_1x4) with block_m=64 for E=257/bs=512/d=256 (was M32 with block_m=32). Matching kernel MPerBlock to sorting block_m.", "why": "DSV3 tuned CSV recommends M64 stage1 with block_m=64 for E=257 shapes with token>=64. Current M32/block_m=32 may underutilize CUs. v164 incorrectly used M32 kernel with block_m=64 (mismatch); this version properly uses M64 kernel.", "keywords": ["m64", "block_m", "e257", "bs512", "stage1", "mperblock-match"], "prior_matches": 0, "ts": "2026-03-20T15:28:54.360157+00:00Z"}
+{"action": "submit", "mode": "test", "v": 170, "result": "pass", "ts": "2026-03-20T15:34:46.945212+00:00Z"}
