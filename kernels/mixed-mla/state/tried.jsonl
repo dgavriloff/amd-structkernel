@@ -1,1 +1,2 @@
 {"v": 93, "what": "Optimize NUM_KV_SPLITS per shape for fp8 path using same heuristic as bf16, and use non-persistent mode (mla_decode_fwd) which avoids separate reduce step for num_kv_splits=1", "keywords": ["kv_splits", "non_persistent", "per_shape"], "score": 76.305, "kept": false, "reason": "+6.0% vs best", "session": 37}
+{"v": 94, "what": "Use non-persistent mode (mla_decode_fwd) with auto split selection, skip reduce for splits=1+fp8", "keywords": ["non_persistent", "splits1", "skip_reduce"], "score": 70.726, "kept": true, "reason": "improved geomean", "session": 37}
