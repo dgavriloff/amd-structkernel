@@ -18,3 +18,7 @@
 {"technique": "E=257 1x1 CK kernels from DSV3 CSV", "reason": "1x1 (64-thread, 32x32 tile) kernels from DSV3 tuned CSV are significantly slower (+9.5%) than cktile_moe ksplit=2 on the competition LB. DSV3 tuning was for different workload patterns.", "count": 1, "sessions": [22]}
 {"technique": "CK heuristic 2x2 wave stage1 kernels", "reason": "Heuristic 256x64x64x128_2x2 is worse than forced 256x128x128x128_1x4 for d=2048 (+28%) and noise-level for other shapes", "count": 1, "sessions": [38]}
 {"technique": "1-stage fmoe_g1u1", "reason": "ASM module compilation adds ~30s timeout on top of existing CK/cktile compilation; scale format incompatibility between shuffled/unshuffled weights", "count": 1, "sessions": [47]}
+{"v": 59, "what": "FlyDSL stage2 for bs128/E33/d=512 (replace cktile_moe)", "keywords": ["cktile", "flydsl", "stage2", "tile-config"], "score": 118.0, "kept": false, "reason": "worse"}
+{"v": 89, "what": "Monkeypatch moe_sorting to reuse pre-allocated buffers", "keywords": ["monkeypatch", "sorting"], "score": 64.0, "kept": false, "reason": "+2.5% geomean"}
+{"v": 98, "what": "block_m=32 for cktile_moe bs128/E33/d=512", "keywords": ["block-size", "cktile", "tile-config"], "score": 109.0, "kept": false, "reason": "noise"}
+{"v": 20, "what": "cktile_moe ksplit=2 for bs=16/E=257/d=256", "keywords": ["cktile", "ksplit", "tile-config"], "score": 90.9, "kept": true, "reason": "**-5.6% geomean**"}

@@ -7,7 +7,6 @@
 {"v": 17, "what": "AITER_KSPLIT=2 globally (cktile_moe for all untuned shapes)", "keywords": ["cktile", "ksplit", "tile-config"], "score": null, "kept": false, "reason": "mixed; global"}
 {"v": 18, "what": "Hybrid: inject ksplit=2 only for bs=16,128 E=33/d=512", "keywords": ["ksplit"], "score": null, "kept": true, "reason": "**-5.5% geomean**"}
 {"v": 19, "what": "Try ksplit=4 instead of ksplit=2 for same shapes", "keywords": ["ksplit"], "score": null, "kept": false, "reason": "slightly worse"}
-{"v": 20, "what": "cktile_moe ksplit=2 for bs=16/E=257/d=256", "keywords": ["cktile", "ksplit", "tile-config"], "score": 90.9, "kept": true, "reason": "**-5.6% geomean**"}
 {"v": 21, "what": "Also add bs=128/E=257/d=256", "keywords": [], "score": 176.0, "kept": true, "reason": "**-3.0% vs v020**"}
 {"v": 22, "what": "Also add bs=512/E=257/d=256", "keywords": [], "score": 275.0, "kept": false, "reason": "+2.1% vs v021"}
 {"v": 23, "what": "ksplit=4 instead of ksplit=2 for E=257 shapes", "keywords": ["ksplit"], "score": null, "kept": false, "reason": "+2.6% vs v021"}
@@ -47,7 +46,6 @@
 {"v": 56, "what": "FlyDSL stage2 t32x128x256_atomic for bs512/E33/d=512", "keywords": ["atomic", "flydsl", "stage2"], "score": 152.0, "kept": true, "reason": "**-4.42% geomean**"}
 {"v": 57, "what": "Add 4-WG stage1 for bs512/E33/d=512 alongside FlyDSL stage2", "keywords": ["4-wg", "flydsl", "stage1", "stage2"], "score": 147.0, "kept": false, "reason": "+1.5% geomean"}
 {"v": 58, "what": "FlyDSL stage2 t32x256x256_atomic (larger tile_n) for d=512", "keywords": ["atomic", "flydsl", "stage2", "tile-config"], "score": 152.0, "kept": false, "reason": "0%"}
-{"v": 59, "what": "FlyDSL stage2 for bs128/E33/d=512 (replace cktile_moe)", "keywords": ["cktile", "flydsl", "stage2", "tile-config"], "score": 118.0, "kept": false, "reason": "worse"}
 {"v": 60, "what": "FlyDSL stage2 t32x128x256_reduce for d=512", "keywords": ["flydsl", "reduce", "stage2"], "score": null, "kept": false, "reason": "FAIL"}
 {"v": 61, "what": "FlyDSL stage2 t32x256x128_atomic (tile_k=128) for d=512", "keywords": ["atomic", "flydsl", "stage2", "tile-config"], "score": null, "kept": false, "reason": "crash"}
 {"v": 62, "what": "Combined: 4-WG stage1 d=512 + FlyDSL stage2 E=257", "keywords": ["4-wg", "flydsl", "stage1", "stage2"], "score": 151.0, "kept": false, "reason": "-0.18% geomean (noise)"}
@@ -75,7 +73,6 @@
 {"v": 86, "what": "CK 1-WG 64x64x128x128_1x1_v3 stage2 for d=2048", "keywords": ["1-wg", "ck", "stage2"], "score": 957.0, "kept": false, "reason": "much worse"}
 {"v": 87, "what": "CK 4-WG 256x64x128x128_1x4_v3 stage2 for d=2048", "keywords": ["4-wg", "ck", "stage2"], "score": 343.0, "kept": false, "reason": "worse"}
 {"v": 88, "what": "FlyDSL t32x256x256_atomic stage2 for d=2048", "keywords": ["atomic", "flydsl", "stage2"], "score": 322.0, "kept": false, "reason": "worse"}
-{"v": 89, "what": "Monkeypatch moe_sorting to reuse pre-allocated buffers", "keywords": ["monkeypatch", "sorting"], "score": 64.0, "kept": false, "reason": "+2.5% geomean"}
 {"v": 90, "what": "CK 2-stage with FlyDSL stage2 for bs128/E257", "keywords": ["ck", "flydsl", "stage2"], "score": 215.0, "kept": false, "reason": "worse"}
 {"v": 91, "what": "CK default stage2 for bs512/E33/d=512", "keywords": ["ck", "stage2"], "score": 210.0, "kept": false, "reason": "worse"}
 {"v": 92, "what": "cktile_moe ksplit=2 for bs512/E33/d=512", "keywords": ["cktile", "ksplit", "tile-config"], "score": 253.0, "kept": false, "reason": "worse"}
@@ -84,7 +81,6 @@
 {"v": 95, "what": "4-WG MPerBlock=32 stage1 (256x32x128x128_1x4) for d=512", "keywords": ["4-wg", "stage1"], "score": null, "kept": false, "reason": "not benchmarked (session ended by coordinator)"}
 {"v": 96, "what": "hip.hipModuleLoadData at module scope (import time)", "keywords": ["hip"], "score": null, "kept": false, "reason": "BLOCKED"}
 {"v": 97, "what": "4-WG MPerBlock=32 stage1 (256x32x128x128_1x4) for d=512", "keywords": ["4-wg", "stage1"], "score": null, "kept": false, "reason": "FAIL"}
-{"v": 98, "what": "block_m=32 for cktile_moe bs128/E33/d=512", "keywords": ["block-size", "cktile", "tile-config"], "score": 109.0, "kept": false, "reason": "noise"}
 {"v": 99, "what": "torch.inference_mode() decorator", "keywords": ["inference-mode"], "score": null, "kept": false, "reason": "noise (server variability)"}
 {"v": 100, "what": "Bypass fused_moe_ torch.ops dispatch wrapper, inline fused_moe_2stages", "keywords": ["bypass", "dispatch", "fused"], "score": null, "kept": false, "reason": "+3.2% geomean"}
 {"v": 101, "what": "Direct FlyDSL stage2 dispatch bypassing flydsl_moe_stage2 Python wrapper", "keywords": ["bypass", "dispatch", "flydsl", "stage2"], "score": null, "kept": false, "reason": "BLOCKED"}

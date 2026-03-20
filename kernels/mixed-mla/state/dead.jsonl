@@ -1,0 +1,1 @@
+{"v": 94, "what": "Use non-persistent mode (mla_decode_fwd) with auto split selection, skip reduce for splits=1+fp8", "keywords": ["non_persistent", "splits1", "skip_reduce"], "score": 70.726, "kept": true, "reason": "improved geomean", "session": 37}
