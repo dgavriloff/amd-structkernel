@@ -2,9 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v238: BSM=16 for K>4096 split-K path (from 8). For M=16: 1 M-tile
-(exact fit) vs 2 tiles with modular wrapping. Grid 119 vs 238 blocks.
-Each block processes all 16 M-rows directly.
+v224: Unify M<=32 K>1024 with K<=1024 config: BSM=8 BSN=128 BSK=256
+NW=4 NS=2 cache=None waves=2. Eliminates BSM=32 BSN=64 BSK=512 NW=8
+NS=1 special case. 2x more blocks (128 vs 64 for M=32 N=4096 K=4096).
+v209 tried .cg (not None). cache=None allows L1 B-tile reuse.
 """
 import torch
 import triton
@@ -41,10 +42,10 @@ def _get_fused_config(M, N, K):
     """
     if K > 4096:
         # Custom split-K=7 BSK=256 for large-K shapes (e.g., 16x2112x7168)
-        # BSM=16: 119 blocks (0.46 waves), exact M=16 coverage (1 tile)
+        # BSM=8: 238 blocks (0.93 waves) vs BSM=16: 119 blocks (0.46 waves)
         # waves_per_eu=2: tuned JSON uses this for M>=16 shapes
         return {
-            "BLOCK_SIZE_M": 16,
+            "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
             "BLOCK_SIZE_K": 256,
             "GROUP_SIZE_M": 1,
