@@ -2,11 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v223: waves_per_eu=0 for M<=32 K>1024 path (from 2).
+v222: waves_per_eu=1 for M<=32 K<=1024 path (from 2).
 
-BSM=32 BSN=64 BSK=512 NW=8 NS=1 path affects M=32 N=4096 K=4096.
-Grid=64 blocks (0.25 waves). Let compiler auto-decide occupancy
-for this unique NW=8 NS=1 config.
+AMD preshuffle config for N=4096 K=512 uses waves=1.
+v120 tested waves=0 (neutral), v203 tested waves=0 LB (+1.4%).
+waves=1 proposed in v217 but never benchmarked.
 """
 import torch
 import triton
@@ -91,7 +91,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 2,
+            "waves_per_eu": 1,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": None,
             "NUM_KSPLIT": 1,
@@ -104,7 +104,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 8,
             "num_stages": 1,
-            "waves_per_eu": 0,
+            "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": None,
             "NUM_KSPLIT": 1,
