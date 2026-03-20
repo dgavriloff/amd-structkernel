@@ -1,16 +1,5 @@
 # Kernel Optimization Agent
 
-## HARNESS CHANGE (2026-03-19)
-The organizers updated aiter on the server. ALL old submissions (v1-v89) that use
-`mla_decode_fwd` from `aiter.mla` are BROKEN — `mla_decode_stage1_asm_fwd` dropped
-the `lse` output parameter, shifting q_scale/kv_scale positions → garbage results.
-
-- DO NOT revert to any old submission from submissions/ — they will all fail.
-- The current best_submission.py (v091) uses the new two-stage API directly
-  (`mla_decode_stage1_asm_fwd` + `mla_reduce_v1`) and passes all tests.
-- page_size>1 is broken with the new aiter. Use page_size=1 for all paths.
-- The old tried.jsonl scores (v1-v89) are from the old harness and not comparable.
-
 ## Workflow
 1. Read `problem.md` and `submission.py`. Run `./tools/leaderboard.sh` to see the competition — know your target score and rank.
 2. Form a hypothesis. Use the full extent of your abilities — read source code, clone repos, search the web, analyze ISA references, disassemble binaries, study papers, whatever it takes to find a path forward
