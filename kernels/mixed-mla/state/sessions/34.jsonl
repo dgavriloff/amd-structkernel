@@ -1,0 +1,3 @@
+{"action": "propose", "what": "Establish v091 baseline score on new harness", "why": "Need real BM score after harness change \u2014 best.json has placeholder 999.0", "keywords": ["baseline", "v091", "harness-fix"], "prior_matches": 0, "ts": "2026-03-20T06:00:05.421576+00:00Z"}
+{"action": "submit", "mode": "benchmark", "v": 91, "score": null, "best": null, "kept": false, "reason": "could not parse score", "ts": "2026-03-20T06:14:10.886912+00:00Z"}
+{"action": "submit", "mode": "benchmark", "v": 91, "score": null, "best": null, "kept": false, "reason": "could not parse score", "ts": "2026-03-20T06:29:28.537086+00:00Z"}

@@ -32,7 +32,7 @@ for kernel_dir in "$REPO_DIR"/kernels/*/; do
 import json
 lb = json.load(open('$LB_FILE'))
 k = lb.get('$kernel', {})
-print(k.get('score', 999999))
+print(k.get('bm_score', k.get('score', 999999)))
 ")
 
     # Check if improved (>0.1% better)
@@ -64,6 +64,8 @@ text = sys.stdin.read()
 idx = text.find('Ranked Benchmark')
 if idx == -1: idx = text.find('ranked benchmark')
 if idx == -1: idx = text.find('Ranked benchmark')
+if idx == -1: idx = text.find('## Benchmarks:')
+if idx == -1: idx = text.find('Benchmarks:')
 if idx == -1:
     print('')
     sys.exit(0)

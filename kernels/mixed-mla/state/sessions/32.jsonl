@@ -1,0 +1,3 @@
+{"action": "propose", "what": "Pure MXFP4 kernel: use MXFP4 for both K and V (dot_scaled for K, manual dequant for V). Halves V bandwidth vs FP8. Unpack fp4x2 to bf16 for V, apply e8m0 block scales.", "why": "V loads are ~50% of stage1 bandwidth. MXFP4 V is half the bytes of FP8 V (288B vs 576B per token). Previous v118 tried bf16 V and regressed. MXFP4 V saves bandwidth at cost of dequant ALU.", "keywords": ["mxfp4-v", "pure-mxfp4", "bandwidth", "dequant"], "prior_matches": 0, "ts": "2026-03-20T05:19:47.732690+00:00Z"}
+{"action": "submit", "mode": "test", "v": 136, "result": "pass", "ts": "2026-03-20T05:36:11.303347+00:00Z"}
+{"action": "submit", "mode": "test", "v": 136, "result": "pass", "ts": "2026-03-20T05:46:15.242771+00:00Z"}

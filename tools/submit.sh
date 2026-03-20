@@ -45,16 +45,12 @@ fi
 MAX_PER_HOUR=10
 touch "$RATE_FILE"
 
-(
-    flock 200
+while true; do
+    NOW=$(date +%s)
+    CUTOFF=$((NOW - 3600))
 
-    while true; do
-        NOW=$(date +%s)
-        CUTOFF=$((NOW - 3600))
-
-        # Count submissions of this mode in the last hour
-        COUNT=$(python3 -c "
-import json, sys
+    COUNT=$(python3 -c "
+import json
 count = 0
 lines = []
 for line in open('$RATE_FILE'):
@@ -72,12 +68,11 @@ with open('$RATE_FILE', 'w') as f:
 print(count)
 ")
 
-        if [ "$COUNT" -lt "$MAX_PER_HOUR" ]; then
-            break
-        fi
+    if [ "$COUNT" -lt "$MAX_PER_HOUR" ]; then
+        break
+    fi
 
-        # Find when the oldest entry for this mode expires
-        WAIT=$(python3 -c "
+    WAIT=$(python3 -c "
 import json
 now = $(date +%s)
 cutoff = now - 3600
@@ -92,11 +87,9 @@ for line in open('$RATE_FILE'):
 wait = (oldest + 3600) - now + 5 if oldest else 60
 print(max(wait, 5))
 ")
-        echo "Rate limit hit ($COUNT/$MAX_PER_HOUR $MODE/hr). Waiting ${WAIT}s..."
-        sleep "$WAIT"
-    done
-
-) 200>"$RATE_FILE.lock"
+    echo "Rate limit hit ($COUNT/$MAX_PER_HOUR $MODE/hr). Waiting ${WAIT}s..."
+    sleep "$WAIT"
+done
 
 # Get the leaderboard name from submission.py
 LEADERBOARD=$(grep '#!POPCORN leaderboard' "$KERNEL_DIR/submission.py" | head -1 | awk '{print $3}')
@@ -106,7 +99,8 @@ if [ -z "$LEADERBOARD" ]; then
 fi
 
 # Get current version number from submission.py header
-VERSION=$(head -20 "$KERNEL_DIR/submission.py" | grep -oE 'v[0-9]+' | head -1 | tr -d 'v' || echo "0")
+VERSION=$(head -20 "$KERNEL_DIR/submission.py" | grep -oE 'v[0-9]+' | head -1 | tr -d 'v' | sed 's/^0*//' || echo "0")
+VERSION=${VERSION:-0}
 
 echo "=== Submitting in $MODE mode (v$VERSION) ==="
 
@@ -116,14 +110,11 @@ RESULT=$(popcorn-cli submit --gpu MI355X --leaderboard "$LEADERBOARD" --mode "$M
 echo "$RESULT"
 
 # Record rate limit entry
-(
-    flock 200
-    python3 -c "
+python3 -c "
 import json
 d = {'mode': '$MODE', 'ts_epoch': $(date +%s)}
 print(json.dumps(d))
 " >> "$RATE_FILE"
-) 200>"$RATE_FILE.lock"
 
 # Log to session file
 if [ "$MODE" = "test" ]; then
@@ -139,18 +130,17 @@ print(json.dumps(d))
 " >> "$SESSION_FILE"
 
 elif [ "$MODE" = "benchmark" ]; then
-    # Compute geomean from Ranked Benchmark lines (normalizing ms -> us)
+    # Compute geomean from benchmark timing lines (normalizing ms -> us)
     SCORE=$(echo "$RESULT" | python3 -c "
 import sys, re, math
 text = sys.stdin.read()
-# Find the Ranked Benchmark section
-idx = text.find('Ranked Benchmark')
+# Find the benchmark section (different headers for different modes)
+for header in ['Ranked Benchmark', 'ranked benchmark', 'Ranked benchmark', '## Benchmarks:', 'Benchmarks:']:
+    idx = text.find(header)
+    if idx != -1:
+        break
 if idx == -1:
-    idx = text.find('ranked benchmark')
-if idx == -1:
-    idx = text.find('Ranked benchmark')
-if idx == -1:
-    print('ERROR: No Ranked Benchmark section found in output', file=sys.stderr)
+    print('ERROR: No benchmark section found in output', file=sys.stderr)
     sys.exit(1)
 ranked_section = text[idx:]
 # Extract mean times with units
@@ -158,9 +148,8 @@ entries = re.findall(r'⏱\s+([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', rank
 if not entries:
     entries = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', ranked_section)
 if not entries:
-    print('ERROR: No timing values found in Ranked Benchmark section', file=sys.stderr)
+    print('ERROR: No timing values found in benchmark section', file=sys.stderr)
     sys.exit(1)
-# Normalize all to us
 times_us = []
 for val, unit in entries:
     t = float(val)
