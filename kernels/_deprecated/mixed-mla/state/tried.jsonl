@@ -1,0 +1,1 @@
+{"v": 138, "what": "Restore Triton MXFP4+FP8 kernel from v123: dot_scaled Q*K with MXFP4, FP8 V loads, adaptive NSPLIT, buffer+NSPLIT caching", "keywords": ["triton", "mxfp4", "fp8", "restore", "v123"], "score": 2348.2, "kept": false, "reason": "+3162.3% vs best", "session": 36}

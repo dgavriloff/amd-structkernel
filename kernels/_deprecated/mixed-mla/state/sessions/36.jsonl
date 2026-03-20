@@ -1,0 +1,4 @@
+{"action": "propose", "what": "Restore Triton MXFP4+FP8 kernel from v123: dot_scaled Q*K with MXFP4, FP8 V loads, adaptive NSPLIT, buffer+NSPLIT caching", "why": "v123 scored 18.09us vs current 71.98us. Triton kernel doesn't use broken aiter API. Restoring proven approach.", "keywords": ["triton", "mxfp4", "fp8", "restore", "v123"], "prior_matches": 0, "ts": "2026-03-20T13:25:29.753461+00:00Z"}
+{"action": "submit", "mode": "test", "v": 138, "result": "pass", "ts": "2026-03-20T13:30:57.127230+00:00Z"}
+{"action": "submit", "mode": "test", "v": 138, "result": "pass", "ts": "2026-03-20T13:39:49.772939+00:00Z"}
+{"action": "submit", "mode": "benchmark", "v": 138, "score": 2348.2, "best": 71.98, "kept": false, "ts": "2026-03-20T13:47:03.427538+00:00Z"}

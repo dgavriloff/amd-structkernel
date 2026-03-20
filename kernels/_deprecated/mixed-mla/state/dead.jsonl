@@ -1,0 +1,143 @@
+{"technique": "custom Triton FlashDecoding", "reason": "v023 was 6-30x slower; implementation was naive, but custom kernel path unlikely to beat ASM", "count": 1}
+{"technique": "page_size > 16 for kv>=4096", "reason": "page_size=128 causes tolerance failures, page_size=32 neutral at best", "count": 3}
+{"technique": "page_size < 8 for kv=1024 at bs=64", "reason": "tolerance flaky on secret LB shapes", "count": 2}
+{"technique": "CUDA graph capture", "reason": "server blocks non-default stream usage", "count": 1}
+{"technique": "direct stage1+reduce bypass", "reason": "pre-cached intermediates don't improve over mla_decode_fwd wrapper", "count": 3}
+{"technique": "non-persistent mode for large batches", "reason": "persistent mode with fast_mode=True always better", "count": 2}
+{"technique": "kv_granularity tuning beyond 16-32 range", "reason": "kv_granularity=64/128 causes tolerance failures or regression", "count": 4}
+{"technique": "NUM_KV_SPLITS tuning (16/24/48/64/76)", "reason": "all attempts within noise of default 32", "count": 6}
+{"technique": "intra_batch_mode=False", "reason": "cross-batch scheduling always regresses or has secret LB failures", "count": 3}
+{"technique": "a8w8 (fp8 Q + fp8 KV)", "reason": "GPU-only Q quantization has massive overhead (+285%)", "count": 2}
+{"technique": "bf16 persistent for kv=1024", "reason": "tolerance failures at page_size=16/32, regression at page_size=8", "count": 4}
+{"technique": "bf16_persist page_size=128 for kv>=4096", "reason": "Tolerance failure at all batch sizes including bs>=64 (v106). Sub-page kv_granularity=32 for bf16_persist is noise-neutral (v109).", "count": 1, "sessions": [7]}
+{"technique": "all-heads-per-program MXFP4 Triton", "reason": "Register pressure from [16,256] accumulators and masked row extraction tl.sum(acc*mask) makes all-heads ~10x slower than per-head", "count": 1, "sessions": [12]}
+{"technique": "multi-head-per-program", "reason": "Duplicating accumulators for 2+ heads causes massive register spill on MI355X, outweighing shared KV load savings", "count": 1, "sessions": [16]}
+{"technique": "num_stages=1 for Triton stage1", "reason": "Secret LB shapes regressed catastrophically (+321%), likely due to different kv_seq_len distribution", "count": 1, "sessions": [21]}
+{"v": 2, "what": "Use aiter mla_decode_fwd persistent kernel (fp8 Q + fp8 KV)", "keywords": ["fp8", "persistent"], "score": 167.8, "kept": true, "reason": "167.8µs"}
+{"v": 3, "what": "Cache metadata, kv_indices, output buffers across calls", "keywords": ["cache", "scheduling"], "score": 92.7, "kept": true, "reason": "-44.7%"}
+{"v": 4, "what": "Use aiter.scaled_fp8_quant for Q (C++ fused kernel) + cleanup", "keywords": ["fp8", "fused", "quant"], "score": 90.6, "kept": true, "reason": "-2.3%"}
+{"v": 5, "what": "Bypass mla_decode_fwd, call stage1+reduce directly w/ cached intermediates", "keywords": ["bypass", "cache", "reduce", "stage1"], "score": 91.9, "kept": false, "reason": "+1.4%"}
+{"v": 6, "what": "16 KV splits for kv<=1024 (reduce overhead)", "keywords": ["reduce"], "score": 93.5, "kept": false, "reason": "+3.2%"}
+{"v": 7, "what": "CUDA graph capture of Q quant + stage1 + reduce", "keywords": ["cuda-graph", "quant", "reduce", "stage1"], "score": 107.2, "kept": false, "reason": "+18.3%"}
+{"v": 8, "what": "Use bf16 Q+KV for bs<=4 (no Q quantization)", "keywords": ["bf16", "quant"], "score": 81.1, "kept": true, "reason": "-10.5%"}
+{"v": 9, "what": "Extend bf16 threshold: bs<=4 all + bs<=32 kv<=1024", "keywords": ["bf16"], "score": 73.7, "kept": true, "reason": "-18.7%"}
+{"v": 10, "what": "Extend bf16 to bs<=64 kv<=1024", "keywords": ["bf16"], "score": 70.4, "kept": true, "reason": "-22.3%"}
+{"v": 11, "what": "Extend bf16 to all kv<=1024 shapes", "keywords": ["bf16"], "score": 75.2, "kept": false, "reason": "+6.9% vs v010"}
+{"v": 12, "what": "fast_mode=True metadata + per-shape tuned splits (16 for kv<=1k, 64 for kv=8k)", "keywords": ["fast-mode", "scheduling"], "score": 73.0, "kept": false, "reason": "-0.9%"}
+{"v": 13, "what": "fast_mode=True + 16 splits for bf16, 32 for fp8", "keywords": ["bf16", "fast-mode", "fp8"], "score": 78.7, "kept": false, "reason": "+6.8%"}
+{"v": 14, "what": "Non-persistent bf16 (auto-tuned splits, no metadata) + persistent fp8", "keywords": ["bf16", "fp8", "non-persistent", "persistent", "scheduling"], "score": 71.9, "kept": true, "reason": "-2.4%"}
+{"v": 15, "what": "Non-persistent fp8 (auto-tuned splits) — tests pass but errors near tolerance limit", "keywords": ["fp8", "non-persistent", "persistent"], "score": null, "kept": false, "reason": "—"}
+{"v": 16, "what": "Extend non-persistent bf16 to bs<=64 kv<=1024 (non-persistent may pass tolerance where persistent v010 failed)", "keywords": ["bf16", "non-persistent", "persistent"], "score": 65.8, "kept": true, "reason": "-8.5%"}
+{"v": 17, "what": "Pre-allocate bf16 non-persistent intermediates (logits, attn_lse) — bypass mla_decode_fwd", "keywords": ["bf16", "bypass", "non-persistent", "persistent"], "score": 66.5, "kept": false, "reason": "+1.0%"}
+{"v": 18, "what": "Non-persistent fp8 for bs=256,kv=8192 only (auto-tuned 7 splits)", "keywords": ["fp8", "non-persistent", "persistent"], "score": 69.5, "kept": false, "reason": "+5.7%"}
+{"v": 19, "what": "Extend non-persistent bf16 to all kv<=1024 shapes (including bs=256)", "keywords": ["bf16", "non-persistent", "persistent"], "score": 66.4, "kept": false, "reason": "+1.0%"}
+{"v": 20, "what": "Non-persistent fp8 via mla_decode_fwd for bs=256,kv<=1024 (auto-tuner picks 1 split)", "keywords": ["fp8", "non-persistent", "persistent"], "score": 66.0, "kept": false, "reason": "+0.4%"}
+{"v": 21, "what": "Direct stage1 call with 1 split, pre-cached intermediates for bs>=128,kv<=1024", "keywords": ["cache", "stage1"], "score": 65.6, "kept": false, "reason": "-0.3%"}
+{"v": 22, "what": "Non-persistent fp8 for bs=32,kv=8k (9 splits) AND bs=256,kv<=1024 (1 split)", "keywords": ["fp8", "non-persistent", "persistent"], "score": 65.0, "kept": false, "reason": "-1.2%"}
+{"v": 23, "what": "Custom Triton FlashDecoding kernel for bf16 MLA decode (fused attention + reduce)", "keywords": ["bf16", "fused", "reduce", "triton"], "score": 350.0, "kept": false, "reason": "+430%+"}
+{"v": 24, "what": "Persistent bf16 with 32 splits for bs<=4 kv=8192 (better work distribution)", "keywords": ["bf16", "persistent"], "score": 68.8, "kept": false, "reason": "+4.6%"}
+{"v": 25, "what": "Non-persistent fp8 for bs>=128 kv<=1024 (auto-tuned 1 split, skip reduce)", "keywords": ["fp8", "non-persistent", "persistent", "reduce"], "score": null, "kept": false, "reason": "—"}
+{"v": 26, "what": "Persistent a16w8 (bf16 Q + fp8 KV) to skip Q quantization for large batch, short KV", "keywords": ["a16w8", "bf16", "fp8", "persistent", "quant"], "score": 67.3, "kept": false, "reason": "+1.5-1.8%"}
+{"v": 27, "what": "Per-shape tuned NUM_KV_SPLITS: 48 for bs<=64 kv>=4096, 32 for rest", "keywords": ["kv-splits"], "score": 65.9, "kept": false, "reason": "+0.2%"}
+{"v": 28, "what": "a16w8 persistent (bf16 Q + fp8 KV) for bs>=128 kv<=1024 only, v016 for all else", "keywords": ["a16w8", "bf16", "fp8", "persistent"], "score": 66.2, "kept": false, "reason": "+0.7%"}
+{"v": 29, "what": "page_size=16 for fp8 persistent path (all shapes)", "keywords": ["fp8", "page-size", "persistent"], "score": 42.0, "kept": false, "reason": "~-36%"}
+{"v": 29, "what": "page_size=16 for kv>=4096 only, page_size=1 for kv<=1024", "keywords": ["page-size"], "score": 46.5, "kept": true, "reason": "-29.2%"}
+{"v": 30, "what": "Combine v029b + a16w8 (bf16 Q + fp8 KV) for bs>=128 kv<=1024", "keywords": ["a16w8", "bf16", "fp8"], "score": 45.6, "kept": true, "reason": "-1.7%"}
+{"v": 31, "what": "bf16 page_size=16 for kv>=4096 (same optimization as fp8 path)", "keywords": ["bf16", "fp8", "page-size"], "score": 41.9, "kept": false, "reason": "-8.1% est"}
+{"v": 31, "what": "Fix v031: don't cache kv_indptr for page_size=1", "keywords": ["cache", "page-size"], "score": 41.9, "kept": false, "reason": "-8.1%"}
+{"v": 32, "what": "page_size=16 for a16w8 persistent kv=1024", "keywords": ["a16w8", "page-size", "persistent"], "score": null, "kept": false, "reason": "—"}
+{"v": 33, "what": "Bypass mla_decode_fwd for bf16 non-persistent (direct ASM+Triton with cached intermediates)", "keywords": ["asm", "bf16", "bypass", "cache", "non-persistent"], "score": 46.2, "kept": false, "reason": "+1.3%"}
+{"v": 34, "what": "a16w8 persistent with page_size=4 for bs>=128,kv<=1024", "keywords": ["a16w8", "page-size", "persistent"], "score": 40.4, "kept": false, "reason": "-11.4%"}
+{"v": 35, "what": "a16w8 persistent with page_size=2 for bs>=128,kv<=1024", "keywords": ["a16w8", "page-size", "persistent"], "score": 42.4, "kept": true, "reason": "-7.1%"}
+{"v": 36, "what": "Extend a16w8 to all non-bf16 shapes (page_size=16 for kv>=4096, page_size=2 for kv=1024)", "keywords": ["a16w8", "bf16", "page-size"], "score": 36.7, "kept": true, "reason": "-13.4%"}
+{"v": 37, "what": "Extend a16w8 to bs=64,kv=1024 (page_size=2, replacing bf16 non-persistent)", "keywords": ["a16w8", "bf16", "non-persistent", "page-size", "persistent"], "score": 35.4, "kept": true, "reason": "-3.5%"}
+{"v": 38, "what": "Extend a16w8 to bs=32,kv=1024 (page_size=2, replacing bf16 non-persistent)", "keywords": ["a16w8", "bf16", "non-persistent", "page-size", "persistent"], "score": 35.7, "kept": false, "reason": "+0.3%"}
+{"v": 39, "what": "a16w8 page_size=8 for bs>=64,kv=1024 (128 pages, 4 pages/split)", "keywords": ["a16w8", "page-size"], "score": 30.4, "kept": true, "reason": "-14.5%"}
+{"v": 40, "what": "page_size=32 for kv>=4096 (was 16)", "keywords": ["page-size"], "score": 27.7, "kept": false, "reason": "-9.0%"}
+{"v": 41, "what": "a16w8 page_size=16 for bs=4,kv=8192 (switching from bf16 non-persistent)", "keywords": ["a16w8", "bf16", "non-persistent", "page-size", "persistent"], "score": 29.9, "kept": false, "reason": "-1.5%"}
+{"v": 42, "what": "a16w8 page_size=8 for bs>=32,kv=1024", "keywords": ["a16w8", "page-size"], "score": 29.0, "kept": false, "reason": "-4.5%"}
+{"v": 42, "what": "v042 retry (public leaderboard failure at bs=64,kv=1k was flaky)", "keywords": [], "score": 28.9, "kept": true, "reason": "-4.9%"}
+{"v": 43, "what": "a16w8 page_size=4 for bs=32,kv=1024 (safer tolerance)", "keywords": ["a16w8", "page-size"], "score": 29.9, "kept": false, "reason": "+3.4% vs v042"}
+{"v": 44, "what": "a16w8 page_size=8 for bs=4,kv=8192 (switching from bf16 non-persistent)", "keywords": ["a16w8", "bf16", "non-persistent", "page-size", "persistent"], "score": 28.7, "kept": false, "reason": "-0.7%"}
+{"v": 45, "what": "bf16 persistent page_size=16 for bs=4,kv>=4096", "keywords": ["bf16", "page-size", "persistent"], "score": 28.8, "kept": false, "reason": "-0.2%"}
+{"v": 46, "what": "Bypass mla_decode_fwd for persistent: direct stage1_asm + reduce_v1 with pre-cached logits/attn_lse", "keywords": ["asm", "bypass", "cache", "persistent", "reduce"], "score": 29.4, "kept": false, "reason": "+1.6%"}
+{"v": 47, "what": "bf16 persistent page_size=16 for bs=4,kv>=4096 (no fp8 quantization error)", "keywords": ["bf16", "fp8", "page-size", "persistent", "quant"], "score": 28.4, "kept": true, "reason": "-1.6%"}
+{"v": 48, "what": "kv_granularity=32 for kv>=4096 metadata scheduling", "keywords": ["kv-granularity", "scheduling"], "score": 28.3, "kept": false, "reason": "-0.7%"}
+{"v": 49, "what": "bf16 persistent page_size=8 for bs=4,kv>=4096 (2x more pages)", "keywords": ["bf16", "page-size", "persistent"], "score": 28.4, "kept": false, "reason": "-0.2%"}
+{"v": 50, "what": "a16w8 page_size=8 for bs=4,kv=1024 (replacing bf16 non-persistent)", "keywords": ["a16w8", "bf16", "non-persistent", "page-size", "persistent"], "score": 28.7, "kept": false, "reason": "+1.0%"}
+{"v": 51, "what": "fast_mode=True for metadata on bs>=128,kv>=4096", "keywords": ["fast-mode", "scheduling"], "score": 28.3, "kept": false, "reason": "-0.7%"}
+{"v": 52, "what": "NUM_KV_SPLITS=24 for a16w8 kv<=1024 page_size=8 shapes (more work per split)", "keywords": ["a16w8", "kv-splits", "page-size"], "score": 28.3, "kept": false, "reason": "-0.4%"}
+{"v": 53, "what": "bf16 persistent page_size=16 for bs<=32,kv=1024", "keywords": ["bf16", "page-size", "persistent"], "score": null, "kept": false, "reason": "—"}
+{"v": 54, "what": "Combine page_size=8 + kv_granularity=32 for kv=1024 a16w8 shapes", "keywords": ["a16w8", "kv-granularity", "page-size"], "score": 28.2, "kept": false, "reason": "-0.8%"}
+{"v": 55, "what": "a16w8 page_size=4 for bs=32,kv=1024 only (256 pages, 8 pages/split)", "keywords": ["a16w8", "page-size"], "score": 29.9, "kept": false, "reason": "+39.7% for bs=32,kv=1k"}
+{"v": 56, "what": "Combo sweep: kv_granularity=32 for kv>=4096 + fast_mode=True for bs>=128,kv>=4096 + NUM_KV_SPLITS=24 for kv<=1024 page_size=8", "keywords": ["fast-mode", "kv-granularity", "kv-splits", "page-size"], "score": 28.7, "kept": false, "reason": "+1.1%"}
+{"v": 57, "what": "fast_mode=True for ALL persistent paths (both get_mla_metadata_info_v1 and get_mla_metadata_v1)", "keywords": ["fast-mode", "persistent", "scheduling"], "score": 26.5, "kept": true, "reason": "-7.0%"}
+{"v": 58, "what": "intra_batch_mode=False (true CU-based persistent scheduling)", "keywords": ["persistent", "scheduling"], "score": 27.5, "kept": false, "reason": "+3.8%"}
+{"v": 59, "what": "Extend bf16 persistent page_size=16 to bs<=32,kv>=4096", "keywords": ["bf16", "page-size", "persistent"], "score": 26.9, "kept": false, "reason": "+1.7%"}
+{"v": 60, "what": "NUM_KV_SPLITS=48 for all kv>=4096 (more splits with fast_mode)", "keywords": ["fast-mode", "kv-splits"], "score": 27.3, "kept": false, "reason": "+3.0%"}
+{"v": 61, "what": "NUM_KV_SPLITS=48 for a16w8 kv>=4096 only (keep 32 for bf16_persist)", "keywords": ["a16w8", "bf16", "kv-splits"], "score": 26.6, "kept": false, "reason": "+0.6%"}
+{"v": 62, "what": "kv_granularity=32 for all persistent paths (was max(page_size,16))", "keywords": ["kv-granularity", "page-size", "persistent"], "score": 26.4, "kept": false, "reason": "-0.4%"}
+{"v": 63, "what": "Pre-cache logits/attn_lse, bypass mla_decode_fwd (direct stage1+reduce)", "keywords": ["bypass", "cache", "reduce", "stage1"], "score": 26.4, "kept": false, "reason": "-0.0%"}
+{"v": 64, "what": "Combine kv_granularity=32 + NUM_KV_SPLITS=48 for a16w8 kv>=4096 (both individually neutral)", "keywords": ["a16w8", "kv-granularity", "kv-splits"], "score": 26.7, "kept": false, "reason": "+0.8%"}
+{"v": 65, "what": "page_size=8 for kv>=4096 (was 16) — finer granularity", "keywords": ["page-size"], "score": 31.0, "kept": false, "reason": "+17%"}
+{"v": 66, "what": "NUM_KV_SPLITS=64 for bs>=256,kv>=4096 (more CU saturation)", "keywords": ["kv-splits"], "score": 26.6, "kept": false, "reason": "+0.6%"}
+{"v": 67, "what": "bf16 persistent (a16w16) for bs<=32,kv>=4096 (avoid fp8 dequant)", "keywords": ["bf16", "fp8", "persistent", "quant"], "score": 26.3, "kept": false, "reason": "-0.6% BM, LB fail"}
+{"v": 68, "what": "bf16_persist for bs<=32,kv>=4096 (avoid fp8 dequant, retry of v067 concept)", "keywords": ["bf16", "fp8", "quant"], "score": 26.6, "kept": false, "reason": "+0.4%"}
+{"v": 69, "what": "Per-shape NUM_KV_SPLITS: 8 for bs>=256,kv>=4096, 16 for bs>=64,kv>=4096 (auto-tuner model suggests fewer splits)", "keywords": ["kv-splits"], "score": 26.4, "kept": false, "reason": "-0.2%"}
+{"v": 70, "what": "Increase NUM_KV_SPLITS from 32 to 76 for bs=4 (saturate all 304 CUs)", "keywords": ["kv-splits"], "score": 27.0, "kept": false, "reason": "+2%"}
+{"v": 71, "what": "bf16 non-persistent for all bs=4 shapes (remove bf16_persist path)", "keywords": ["bf16", "non-persistent", "persistent"], "score": 30.0, "kept": false, "reason": "+13%"}
+{"v": 72, "what": "is_causal=False for persistent metadata (no causal mask needed for decode q=1)", "keywords": ["persistent", "scheduling"], "score": 26.5, "kept": false, "reason": "0%"}
+{"v": 73, "what": "bf16 persistent (a16w16) for bs=64,kv>=4096", "keywords": ["bf16", "persistent"], "score": 26.7, "kept": false, "reason": "+0.8%"}
+{"v": 74, "what": "kv_granularity=128 for a16w8 kv>=4096 (larger work chunks)", "keywords": ["a16w8", "kv-granularity"], "score": 26.7, "kept": false, "reason": "+0.8% BM, secret LB fail"}
+{"v": 74, "what": "kv_granularity=128 for ALL kv>=4096 (a16w8 + bf16_persist)", "keywords": ["a16w8", "bf16", "kv-granularity"], "score": 27.3, "kept": false, "reason": "+3.0% BM, secret LB fail"}
+{"v": 75, "what": "kv_granularity=64 for a16w8 kv>=4096 (between default 16 and failed 128)", "keywords": ["a16w8", "kv-granularity"], "score": 26.0, "kept": false, "reason": "-1.9% BM, secret LB fail"}
+{"v": 76, "what": "kv_granularity=32 for a16w8 kv>=4096 with fast_mode=True", "keywords": ["a16w8", "fast-mode", "kv-granularity"], "score": 27.1, "kept": false, "reason": "+2.3% BM"}
+{"v": 77, "what": "bf16 non-persistent for bs=32,kv=1024 (replacing a16w8 persistent page_size=8)", "keywords": ["a16w8", "bf16", "non-persistent", "page-size", "persistent"], "score": 29.0, "kept": false, "reason": "+42% for bs=32,kv=1k"}
+{"v": 78, "what": "a8w8 persistent (fp8 Q + fp8 KV, qseqlen=1 kernel) for bs>=128,kv>=4096", "keywords": ["a8w8", "fp8", "persistent"], "score": 33.0, "kept": false, "reason": "+54% for bs=256,kv=8k"}
+{"v": 79, "what": "Combine kv_granularity=32 + direct stage1_asm+reduce_v1 bypass with pre-cached logits/attn_lse", "keywords": ["asm", "bypass", "cache", "kv-granularity", "reduce"], "score": 26.6, "kept": false, "reason": "+0.4% BM, secret LB fail"}
+{"v": 80, "what": "Non-persistent bf16 with manual num_kv_splits=32 (auto-tuner caps at 16)", "keywords": ["bf16", "kv-splits", "non-persistent", "persistent"], "score": 26.7, "kept": false, "reason": "+0.9%"}
+{"v": 81, "what": "a16w8 page_size=4 for bs=32,kv=1024 with fast_mode=True", "keywords": ["a16w8", "fast-mode", "page-size"], "score": 27.6, "kept": false, "reason": "+8.7% for target"}
+{"v": 82, "what": "kv_granularity=page_size (8) instead of max(page_size,16)=16 for finer work blocks", "keywords": ["kv-granularity", "page-size"], "score": 28.0, "kept": false, "reason": "+10-28% kv=1k shapes"}
+{"v": 83, "what": "bf16_persist for bs=32,kv>=4096 + 16 splits for bs>=256,kv>=4096", "keywords": ["bf16"], "score": 26.9, "kept": false, "reason": "+1.8% BM, -0.8% ranked"}
+{"v": 84, "what": "page_size=2 for bs=64,kv=1024 (trade speed for tolerance reliability)", "keywords": ["page-size"], "score": 28.1, "kept": false, "reason": "+6.3%"}
+{"v": 85, "what": "bf16_persist page_size=32 for bs=4,kv>=4096 (higher precision allows larger pages)", "keywords": ["bf16", "page-size"], "score": 26.5, "kept": false, "reason": "0%"}
+{"v": 86, "what": "Extend bf16_persist page_size=32 to bs<=32,kv>=4096", "keywords": ["bf16", "page-size"], "score": 25.2, "kept": true, "reason": "-4.9%"}
+{"v": 87, "what": "Extend bf16_persist page_size=32 to bs<=64,kv>=4096", "keywords": ["bf16", "page-size"], "score": 24.4, "kept": true, "reason": "-3.2% vs v086"}
+{"v": 88, "what": "Extend bf16_persist page_size=32 to ALL kv>=4096 (including bs=256)", "keywords": ["bf16", "page-size"], "score": 23.8, "kept": true, "reason": "-2.5% vs v087"}
+{"v": 89, "what": "bf16_persist page_size=64 for ALL kv>=4096", "keywords": ["bf16", "page-size"], "score": 21.9, "kept": true, "reason": "-8.0% vs v088"}
+{"v": 90, "what": "bf16_persist page_size=128 for ALL kv>=4096", "keywords": ["bf16", "page-size"], "score": null, "kept": false, "reason": "—"}
+{"v": 91, "what": "bf16_persist page_size=32 for kv<=1024 (replace a16w8)", "keywords": ["a16w8", "bf16", "page-size"], "score": null, "kept": false, "reason": "—"}
+{"v": 92, "what": "bf16_persist page_size=16 for kv<=1024 (replace a16w8)", "keywords": ["a16w8", "bf16", "page-size"], "score": null, "kept": false, "reason": "—"}
+{"v": 93, "what": "bf16_persist ps=8 for all kv=1024 (replace a16w8)", "keywords": ["a16w8", "bf16"], "score": 22.3, "kept": false, "reason": "+1.8% BM, secret LB fail"}
+{"v": 94, "what": "bf16_persist ps=4 for bs<=64 kv=1024 (more pages for accuracy)", "keywords": ["bf16"], "score": 22.3, "kept": false, "reason": "+1.8% BM (+13% bs=32,kv=1k)"}
+{"v": 95, "what": "a16w8 ps=16 for bs=32/64 kv=1024 (fewer pages, less overhead)", "keywords": ["a16w8"], "score": null, "kept": false, "reason": "tolerance fail bs=64,kv=1k"}
+{"v": 96, "what": "64 splits for a16w8 kv=1024 (more parallelism)", "keywords": ["a16w8"], "score": 22.1, "kept": false, "reason": "+0.9% BM (within noise)"}
+{"v": 97, "what": "kv_granularity=128 for bf16_persist (halve work blocks)", "keywords": ["bf16", "kv-granularity"], "score": 23.9, "kept": false, "reason": "+2.6%"}
+{"v": 98, "what": "NUM_KV_SPLITS=16 for bf16_persist (reduce partials)", "keywords": ["bf16", "kv-splits", "reduce"], "score": 23.4, "kept": false, "reason": "+0.5%"}
+{"v": 100, "what": "intra_batch_mode=False for bf16_persist bs>=128 (cross-batch scheduling)", "keywords": ["bf16", "scheduling"], "score": 22.3, "kept": false, "reason": "+1.8% BM, +0.9% ranked"}
+{"v": 101, "what": "a16w8 persistent ps=2 for bs=4,kv=1024 (replace bf16 non-persistent)", "keywords": ["a16w8", "bf16", "non-persistent", "persistent"], "score": 22.1, "kept": false, "reason": "+0.9% BM, secret LB fail"}
+{"v": 102, "what": "bf16_persist page_size=128 for bs<=32,kv>=4096 (2x fewer pages)", "keywords": ["bf16", "page-size"], "score": null, "kept": false, "reason": "tolerance fail bs=4,kv=8k"}
+{"v": 103, "what": "bf16_persist page_size=128 for bs=32 only (bs=4 failed in v102)", "keywords": ["bf16", "page-size"], "score": 16.1, "kept": false, "reason": "tolerance fail bs=32,kv=8k"}
+{"v": 104, "what": "intra_batch_mode=False for bf16_persist bs<=4 (better CU utilization for few blocks)", "keywords": ["bf16", "scheduling"], "score": 21.9, "kept": false, "reason": "0%, secret LB fail"}
+{"v": 105, "what": "a8w8 non-persistent with GPU-only Q quantization (abs+amax+div+cast, no CPU sync)", "keywords": ["a8w8", "non-persistent", "persistent", "quant"], "score": 96.6, "kept": false, "reason": "+285% for target shape"}
+{"v": 110, "what": "Custom Triton flash-decoding kernel with MXFP4 KV cache dequant fused into attention (4x bandwidth savings)", "keywords": ["mxfp4", "triton", "custom-kernel", "flash-decoding", "fused-dequant"], "score": 128.14, "kept": false, "reason": "+450.0% vs best", "session": 12}
+{"v": 111, "what": "MXFP4 Triton kernel v2: per-head processing, optimized fp4 dequant", "keywords": ["mxfp4", "triton", "per-head", "dequant"], "score": 20.78, "kept": true, "reason": "improved geomean", "session": 12}
+{"v": 112, "what": "MXFP4 Triton v3: tl.dot for V accum, 4-head groups, tuned splits per shape", "keywords": ["mxfp4", "triton", "tl.dot", "v-accum"], "score": 194.62, "kept": false, "reason": "+836.6% vs best", "session": 12}
+{"v": 113, "what": "Adaptive NSPLIT + full V dequant in stage1 + single mid buffer", "keywords": ["adaptive-nsplit", "full-v-dequant", "bf16-mid", "stage2-bandwidth"], "score": 20.01, "kept": true, "reason": "improved geomean", "session": 16}
+{"v": 114, "what": "Hybrid MXFP4 K + FP8 V: use dot_scaled for Q*K^T with MXFP4, but load FP8 KV for V accumulation", "keywords": ["hybrid-fp8-v", "mxfp4-k", "fp8-dequant", "bandwidth-vs-compute"], "score": 19.19, "kept": true, "reason": "improved geomean", "session": 16}
+{"v": 115, "what": "BN=128 + num_warps=8 for stage1, reduce loop overhead", "keywords": ["bn128", "warps8", "loop-overhead", "v-load"], "score": 34.41, "kept": false, "reason": "+79.3% vs best", "session": 16}
+{"v": 116, "what": "Fine-tune NSPLIT=4 for kv<=1024, pre-allocate mid buffers, num_stages=3", "keywords": ["nsplit4", "prealloc", "num-stages3", "micro-opt"], "score": 26.89, "kept": false, "reason": "+40.1% vs best", "session": 16}
+{"v": 117, "what": "Hybrid format selection: bf16 KV for small workloads, MXFP4+FP8 for large", "keywords": ["bf16-small", "hybrid-format", "workload-adaptive", "dequant-free"], "score": 31.84, "kept": false, "reason": "+65.9% vs best", "session": 16}
+{"v": 118, "what": "Use bf16 KV cache for V instead of FP8, avoiding fp8 dequant and int64 offset overhead", "keywords": ["bf16-v", "native-loads", "no-int64", "simpler-path"], "score": 38.47, "kept": false, "reason": "+100.5% vs best", "session": 16}
+{"v": 120, "what": "Cache intermediate buffers (mid_v, mid_lse, o) and precomputed tensor views to eliminate Python allocation overhead per call", "keywords": ["buffer-cache", "prealloc", "python-overhead"], "score": 19.12, "kept": true, "reason": "improved geomean", "session": 21}
+{"v": 121, "what": "Load fp8_scale inside kernel from tensor pointer instead of .item() to avoid GPU-CPU sync per call", "keywords": ["fp8-scale", "item-sync", "gpu-sync", "kernel-load"], "score": 18.93, "kept": true, "reason": "improved geomean", "session": 21}
+{"v": 122, "what": "Eliminate kv_indptr .item() GPU-CPU sync by using fixed NSPLIT based on config kv_seq_len instead of computing max_kv from indptr", "keywords": ["item-sync", "nsplit", "config", "kv-indptr"], "score": 20.06, "kept": false, "reason": "+6.0% vs best", "session": 21}
+{"v": 123, "what": "Cache NSPLIT decision by (tq, bs) key to avoid kv_indptr .item() GPU-CPU sync on repeated calls with same shape", "keywords": ["nsplit-cache", "item-sync", "shape-cache"], "score": 18.09, "kept": true, "reason": "improved geomean", "session": 21}
+{"v": 124, "what": "Cache all tensor preprocessing (view/reshape/shape lookups) by data_ptr to skip redundant Python ops when PyTorch reuses memory", "keywords": ["tensor-cache", "data-ptr", "view-cache", "preprocess"], "score": 18.08, "kept": false, "reason": "-0.1% vs best", "session": 21}
+{"v": 125, "what": "num_stages=1 for stage1 to reduce pipelining overhead on short KV loops (2 iters for kv=1024)", "keywords": ["num-stages", "pipelining", "short-loop"], "score": 76.21, "kept": false, "reason": "+321.3% vs best", "session": 21}
+{"v": 126, "what": "Remove unnecessary .to(tl.int64) cast in FP8 V load offset computation \u2014 max offset fits int32 (256*8192*576+511 < 2^31). Int64 ops are 2x slower on CDNA.", "keywords": ["int64", "int32", "fp8-offset", "alu"], "score": 18.13, "kept": false, "reason": "+0.2% vs best", "session": 26}
+{"v": 127, "what": "Reduce stage2 num_warps from 4 to 1 \u2014 stage2 only reads NSPLIT (8 or 16) values and combines them, wastes 3 warps of resources", "keywords": ["stage2", "num-warps", "occupancy", "reduce-kernel"], "score": 18.12, "kept": false, "reason": "+0.2% vs best", "session": 26}
+{"v": 128, "what": "Aggressive Python overhead reduction: pre-cache tensor data_ptr+strides for view/reshape, inline all constants, minimize dict lookups, pre-bind kernel grid params", "keywords": ["python-overhead", "dispatch", "host-code", "small-batch"], "score": 18.16, "kept": false, "reason": "+0.4% vs best", "session": 26}
+{"v": 130, "what": "BN=32 for stage1: halve shared memory usage, potentially double occupancy. More loop iterations but each has lower latency.", "keywords": ["bn32", "occupancy", "lds", "concurrent-waves"], "score": 26.39, "kept": false, "reason": "+45.9% vs best", "session": 26}
+{"v": 133, "what": "Multi-head (16 heads/program) Triton kernel: MXFP4 K via dot_scaled, FP8 V via tl.dot with M=16 heads for MFMA utilization. Load KV once, reuse across all 16 heads (MQA broadcast). BN=32.", "keywords": ["multi-head", "tl-dot", "mfma", "kv-reuse", "mqa-broadcast"], "score": 279.73, "kept": false, "reason": "+1446% vs best", "session": 30}
+{"v": 92, "what": "fp8 Q quantization for a8w8 path \u2014 use mla_a8w8 asm kernel instead of a16w8", "keywords": ["a8w8", "fp8-q", "quantize"], "score": 71.98, "kept": true, "reason": "improved geomean", "session": 35}
