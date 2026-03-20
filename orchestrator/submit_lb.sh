@@ -62,8 +62,9 @@ print(k.get('bm_score', k.get('score', 999999)))
     mkdir -p "$LB_LOGS_DIR"
     echo "$RESULT" > "$LB_LOGS_DIR/lb_v${BM_VERSION}_$(date -u '+%Y%m%d_%H%M%S').log"
 
-    # Check for submission failure
-    if echo "$RESULT" | grep -qi "failed\|error\|timeout\|unauthorized"; then
+    # Check for submission failure — match specific failure patterns, not generic "error"
+    # (server STDERR contains "error" in benign aiter log lines)
+    if echo "$RESULT" | grep -qiE "Application error:|Rate limit exceeded|❌ Benchmarking failed|❌ Testing failed|Failed to trigger"; then
         echo "[$kernel] LB submission FAILED — will retry next cycle"
         continue
     fi
