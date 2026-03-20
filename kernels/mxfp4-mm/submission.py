@@ -2,11 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v220: cache_modifier=None for M=64 fused path (from .cg).
-
-For 64x7168x2048 with BSM=16 BSN=128 BSK=256: B data per block
-is 16KB FP4 per K-iter. Without .cg, L1 caches B tiles across
-4 K-iterations for potential reuse.
+v224: Unify M<=32 K>1024 with K<=1024 config: BSM=8 BSN=128 BSK=256
+NW=4 NS=2 cache=None waves=2. Eliminates BSM=32 BSN=64 BSK=512 NW=8
+NS=1 special case. 2x more blocks (128 vs 64 for M=32 N=4096 K=4096).
+v209 tried .cg (not None). cache=None allows L1 B-tile reuse.
 """
 import torch
 import triton
@@ -83,7 +82,10 @@ def _get_fused_config(M, N, K):
             "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
         }
-    elif M <= 32 and K <= 1024:
+    elif M <= 32:
+        # Unified config for all M<=32 shapes (K<=1024 and K>1024)
+        # BSM=8 gives 4 M-tiles for M=32, BSN=128 for wide N coverage
+        # cache=None allows L1 caching of B tiles across K-iterations
         return {
             "BLOCK_SIZE_M": 8,
             "BLOCK_SIZE_N": 128,
@@ -91,19 +93,6 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 2,
-            "matrix_instr_nonkdim": 16,
-            "cache_modifier": None,
-            "NUM_KSPLIT": 1,
-        }
-    elif M <= 32:
-        return {
-            "BLOCK_SIZE_M": 32,
-            "BLOCK_SIZE_N": 64,
-            "BLOCK_SIZE_K": 512,
-            "GROUP_SIZE_M": 1,
-            "num_warps": 8,
-            "num_stages": 1,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": None,
