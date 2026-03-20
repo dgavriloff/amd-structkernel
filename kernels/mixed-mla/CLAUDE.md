@@ -13,23 +13,27 @@
 8. After a KEEP, run `./tools/leaderboard.sh` to check ranking. LB submissions are handled hourly by the orchestrator.
 9. Repeat from step 2, or if 5 reverts: `./tools/close_branch.sh`
 
-## BM vs LB — Read This Before Optimizing
-Your benchmark (BM) score is NOT your leaderboard (LB) score. See problem.md for the full table, but the critical differences are:
-- **LB uses new random data each iteration** (`recheck=True`, seed increments by +13). BM reuses the same input every iteration.
-- **LB runs `check_implementation()` every iteration**, included in timing. BM checks once at start.
-- **LB has 1ms warmup** (vs 10ms), **100 repeats** (vs 1000).
-
-**What this means**: any optimization that exploits fixed/repeated inputs will show a BM improvement but fail or regress on LB. This includes:
-- CUDA graphs (replay fixed execution plan — breaks with changing inputs)
-- Input-dependent caching or precomputation that assumes data doesn't change between iterations
-- Warmup-dependent tricks (JIT compilation, lazy init) — LB has minimal warmup
-
-**CRITICAL — No buffer caching across calls**: Do NOT pre-allocate tensors in global/module-level dicts or caches that persist across calls to `custom_kernel()`. This means no `_buffer_cache = {}`, no global `torch.empty()` that gets reused, no caching of sorting buffers, intermediate activations, or quantization outputs. Every allocation must happen fresh inside each call. Reused buffers cause stale data to leak between iterations when inputs change (LB), even if they appear to work on fixed inputs (BM). This pattern caused a confirmed LB regression: BM improved but LB got worse because pre-allocated padding regions retained values from previous iterations.
-
-LB submissions are **1 per hour** — don't waste them. Only optimize in ways that are correct for arbitrary inputs on every call.
+## BM vs LB
+BM and LB use different eval parameters. See `problem.md` for the table and `reference/bm-vs-lb-report.md` for the full analysis.
 
 ## Rules
 - Never edit files in `state/`. The tools do that.
 - submit.sh rejects without a registered proposal.
 - Read source code of the component you plan to change before implementing.
 - Clone repos to `reference/cloned-repos/`. Check what's already cloned first.
+
+## Pre-Submission Checklist
+
+Answer NO to all of these or your change will fail/regress on LB:
+
+### Will it break?
+- [ ] **CUDA graphs?**
+- [ ] **Caching tensors the kernel WRITES to?** **When in doubt, allocate fresh.**
+- [ ] **Caching anything derived from input data (not shape/config)?**
+
+### Will it regress?
+- [ ] **Improvement depends on same data running repeatedly?** — Cache line reuse, TLB warmth, allocator patterns all reset with new data. But this is usually small (1-5%).
+- [ ] **Relies on 100ms warmup?** — LB gets 10ms. Triton JIT and autotune need warmup; aiter ASM kernels don't.
+
+### Quick self-test
+Imagine calling `custom_kernel()` 100 times with different random data each time. Is every output correct and roughly the same speed?
