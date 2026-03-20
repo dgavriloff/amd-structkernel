@@ -2,13 +2,15 @@
 #!POPCORN gpu MI355X
 
 """
-v166: Full inline 2-stage pipeline with all buffers pre-allocated.
-Bypass fused_moe and fused_moe_2stages entirely. Pre-allocate
-moe_sorting buffers, a2 intermediate, and call stage kernels directly.
+v168: Pre-allocate quantization output buffers (x_fp4, blockscale_e8m0_sorted)
+for both stage1 and stage2 quant calls. Inline the fused_dynamic_mxfp4_quant_moe_sort
+Triton kernel launch with cached output tensors to eliminate 4 torch.empty allocations
+per forward pass on CK 2-stage shapes.
 """
 import os
 import functools
 import torch
+import triton
 from typing import Dict, Tuple, Optional
 from task import input_t, output_t
 
@@ -21,7 +23,9 @@ from aiter.fused_moe import (
 )
 import aiter.fused_moe as _fused_moe_module
 import aiter.ops.flydsl.moe_kernels as _flydsl_moe_kernels
-from aiter.ops.triton.quant.fused_mxfp4_quant import fused_dynamic_mxfp4_quant_moe_sort
+from aiter.ops.triton._triton_kernels.quant.fused_mxfp4_quant import (
+    _fused_dynamic_mxfp4_quant_moe_sort_kernel,
+)
 from aiter.utility import fp4_utils
 
 # Register FlyDSL tile_k=128 kernels
@@ -124,6 +128,84 @@ def _get_or_alloc_a2(M, topk, inter_dim, device):
     buf = torch.empty((M, topk, inter_dim), dtype=torch.bfloat16, device=device)
     _buffer_cache[key] = buf
     return buf
+
+def _get_or_alloc_quant_buffers(M, N, sorted_ids_len, topk, device):
+    """Pre-allocate quantization output buffers for fused_dynamic_mxfp4_quant_moe_sort."""
+    MXFP4_QUANT_BLOCK_SIZE = 32
+    BLOCK_SIZE_M, BLOCK_SIZE_N = 32, 8
+    BLOCK_SIZE_M_u32, BLOCK_SIZE_N_u32 = 16, 4
+
+    key = ("quant", M, N, sorted_ids_len, topk)
+    if key in _buffer_cache:
+        return _buffer_cache[key]
+
+    x_fp4 = torch.empty((M, N // 2), dtype=torch.uint8, device=device)
+    scaleN = triton.cdiv(N, MXFP4_QUANT_BLOCK_SIZE)
+    M_o = sorted_ids_len
+    N_o = scaleN
+
+    blockscale_e8m0_sorted = torch.empty(
+        (
+            triton.cdiv(M_o, BLOCK_SIZE_M),
+            triton.cdiv(N_o, BLOCK_SIZE_N),
+            BLOCK_SIZE_N_u32,
+            BLOCK_SIZE_M_u32,
+            4,
+        ),
+        dtype=torch.uint8,
+        device=device,
+    )
+
+    bufs = {"x_fp4": x_fp4, "blockscale": blockscale_e8m0_sorted}
+    _buffer_cache[key] = bufs
+    return bufs
+
+def _quant_prealloc(x, sorted_ids, num_valid_ids, token_num, topk, block_size, device):
+    """Inline fused_dynamic_mxfp4_quant_moe_sort with pre-allocated output buffers."""
+    M, N = x.shape
+    MXFP4_QUANT_BLOCK_SIZE = 32
+    BLOCK_SIZE_Mx = 128
+    BLOCK_SIZE_M, BLOCK_SIZE_N = 32, 8
+
+    scaleN = triton.cdiv(N, MXFP4_QUANT_BLOCK_SIZE)
+    M_i, N_i = M, scaleN
+    M_o = sorted_ids.shape[0]
+
+    # Get pre-allocated buffers
+    qbufs = _get_or_alloc_quant_buffers(M, N, M_o, topk, device)
+    x_fp4 = qbufs["x_fp4"]
+    blockscale_e8m0_sorted = qbufs["blockscale"]
+
+    num_pid = triton.cdiv(M, BLOCK_SIZE_Mx) * scaleN + triton.cdiv(
+        M_o, BLOCK_SIZE_M
+    ) * triton.cdiv(N_i, BLOCK_SIZE_N)
+
+    _fused_dynamic_mxfp4_quant_moe_sort_kernel[(num_pid,)](
+        x,
+        x_fp4,
+        sorted_ids,
+        num_valid_ids,
+        blockscale_e8m0_sorted,
+        M,
+        N,
+        scaleN,
+        *x.stride(),
+        *x_fp4.stride(),
+        *blockscale_e8m0_sorted.stride(),
+        token_num=token_num,
+        M_i=M_i,
+        N_i=N_i,
+        MXFP4_QUANT_BLOCK_SIZE=MXFP4_QUANT_BLOCK_SIZE,
+        BLOCK_SIZE_Mx=BLOCK_SIZE_Mx,
+        BLOCK_SIZE_M=BLOCK_SIZE_M // 2,
+        BLOCK_SIZE_N=BLOCK_SIZE_N // 2,
+        TOPK=topk,
+    )
+
+    return (
+        x_fp4.view(dtypes.fp4x2),
+        blockscale_e8m0_sorted.view(dtypes.fp8_e8m0).view(-1, scaleN),
+    )
 
 
 _injected = False
@@ -287,18 +369,14 @@ def custom_kernel(data: input_t) -> output_t:
             sorted_weights=sorted_weights,
         )
     else:
-        # CK 2-stage path: fp4 activation quant
+        # CK 2-stage path: fp4 activation quant with pre-allocated buffers
         w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
         w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
 
         # Stage 1: quant activations + gate_up GEMM + SwiGLU
-        a1, a1_scale = fused_dynamic_mxfp4_quant_moe_sort(
-            hidden_states,
-            sorted_ids=sorted_ids,
-            num_valid_ids=num_valid_ids,
-            token_num=token_num,
-            topk=1,
-            block_size=block_size_M,
+        a1, a1_scale = _quant_prealloc(
+            hidden_states, sorted_ids, num_valid_ids,
+            token_num, 1, block_size_M, device,
         )
 
         a2 = _get_or_alloc_a2(M, topk, inter_dim, device)
@@ -312,15 +390,11 @@ def custom_kernel(data: input_t) -> output_t:
             sorted_weights=None,
         )
 
-        # Inter-stage requant: bf16 -> fp4
+        # Inter-stage requant: bf16 -> fp4 with pre-allocated buffers
         a2_flat = a2.view(-1, inter_dim)
-        a2_quant, a2_scale = fused_dynamic_mxfp4_quant_moe_sort(
-            a2_flat,
-            sorted_ids=sorted_ids,
-            num_valid_ids=num_valid_ids,
-            token_num=token_num,
-            topk=topk,
-            block_size=block_size_M,
+        a2_quant, a2_scale = _quant_prealloc(
+            a2_flat, sorted_ids, num_valid_ids,
+            token_num, topk, block_size_M, device,
         )
         a2_quant = a2_quant.view(token_num, topk, -1)
 
