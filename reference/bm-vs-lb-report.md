@@ -112,15 +112,19 @@ Highest percentage gap. These are the fastest kernels (~6µs) so fixed overheads
 Answer NO to all of these or your change will fail/regress on LB:
 
 ### Will it break?
-- [ ] Any tensor written to by the kernel cached across calls? (output buffers, intermediates)
-- [ ] CUDA graphs?
-- [ ] Caching anything derived from input data (not shape/config)?
-- [ ] Mutating input tensors in-place?
+- [ ] **CUDA graphs?** — Hard no. They replay a fixed execution plan. Incompatible with changing inputs.
+- [ ] **Caching tensors the kernel WRITES to?** — Only dangerous if the kernel doesn't guarantee full overwrite of every element. If the kernel provably writes every byte (e.g., a GEMM output), reusing a pre-allocated buffer is fine and saves allocation overhead. The confirmed failure was an ASM attention kernel with a `splits=1` direct-write path that skipped some output elements. **When in doubt, allocate fresh.**
+- [ ] **Caching anything derived from input data (not shape/config)?** — Quantized activations, sorted routing indices, attention masks — these change with new data. Shape-derived metadata (kv_indices from indptr, tile configs from M/N/K) is safe.
+
+### What IS safe
+- **Mutating input tensors in-place** — The eval harness clones inputs before passing to your kernel (LB: `check_copy = _clone_data(data)`, then `custom_kernel(data)`). Your kernel can freely mutate `data`; the correctness check uses the clone. Useful for in-place quantization to avoid an allocation.
+- **Pre-allocating buffers the kernel fully overwrites** — If you can guarantee every element is written, caching the allocation is fine. Saves ~1µs per `torch.empty()` call.
+- **Caching shape-derived constants** — Metadata, tile configs, kernel function pointers keyed by (M, N, K, batch_size, etc). These don't change when input data changes.
+- **Module-level precomputation** — Work done at import time (before timing starts) is free. Compile kernels, build lookup tables, resolve function pointers.
 
 ### Will it regress?
-- [ ] Improvement depends on same data running repeatedly? (cache warmth, TLB, allocator patterns)
-- [ ] Big BM win (>5%) only on small shapes (<20µs)? Likely cache effects that vanish on LB.
-- [ ] Relies on 100ms warmup? LB gets 10ms.
+- [ ] **Improvement depends on same data running repeatedly?** — Cache line reuse, TLB warmth, allocator patterns all reset with new data. But this is usually small (1-5%).
+- [ ] **Relies on 100ms warmup?** — LB gets 10ms. Triton JIT and autotune need warmup; aiter ASM kernels don't.
 
 ### Quick self-test
 Call `custom_kernel()` 100 times with different random data each time. Is every output correct and roughly the same speed?
