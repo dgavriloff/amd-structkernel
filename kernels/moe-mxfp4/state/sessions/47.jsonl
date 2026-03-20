@@ -3,3 +3,5 @@
 {"action": "submit", "mode": "test", "v": 176, "result": "pass", "ts": "2026-03-20T17:59:18.979609+00:00Z"}
 {"action": "submit", "mode": "benchmark", "v": 176, "score": 123.533, "best": 122.404, "kept": false, "ts": "2026-03-20T18:08:16.840494+00:00Z"}
 {"action": "propose", "what": "Use 1-stage fmoe_g1u1 kernel for ksplit=0 shapes: single kernel does quant+gate_up_GEMM+SwiGLU+down_GEMM+reduction, eliminating inter-stage bf16->fp4 requantization round-trip and second kernel launch", "why": "Current 2-stage path for 4/7 shapes has costly inter-stage requantization (bf16->fp4) between stage1 and stage2. The 1-stage fmoe_g1u1 kernel is listed in gfx950 fused_moe_1stage_dict for our exact problem type (Silu, per_1x32, bf16, fp4x2, fp4x2). Eliminates ~2 kernel launches + global memory round-trip.", "keywords": ["1-stage", "fmoe_g1u1", "requant-elimination", "single-kernel"], "prior_matches": 0, "ts": "2026-03-20T18:11:23.701257+00:00Z"}
+{"action": "submit", "mode": "test", "v": 178, "result": "pass", "ts": "2026-03-20T18:19:17.979587+00:00Z"}
+{"action": "submit", "mode": "test", "v": 178, "result": "fail", "ts": "2026-03-20T18:38:41.380876+00:00Z"}

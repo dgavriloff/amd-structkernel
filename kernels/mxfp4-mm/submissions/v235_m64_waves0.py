@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v236: M<=4 fused path: cache_modifier=None (from .cg). Unify caching
-with M<=32 K<=1024 and M=64 paths. For K=512 BSK=256: 2 K-iters, L1
-caches B data for reuse. v213 tested M<=4+M<=8 together (+1.5%); this
-isolates M<=4 to separate the effect.
+v235: M=64 fused path: waves_per_eu=0 (from 2). Let compiler auto-select
+occupancy. v200 tested waves=0+NS=1 (+35%, NS=1 was the cause). waves=0
+alone with cache=None NS=2 never tested for M=64. v221 waves=3 (+0.9%),
+v234 waves=4 (+1.9%) — higher waves regressed. Testing compiler auto.
 """
 import torch
 import triton
@@ -66,7 +66,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 0,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": None,
+            "cache_modifier": ".cg",
             "NUM_KSPLIT": 1,
         }
     elif M <= 8:
@@ -101,7 +101,7 @@ def _get_fused_config(M, N, K):
     else:
         # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
-        # waves_per_eu=2: hint for higher occupancy per EU
+        # waves_per_eu=0: let compiler auto-select occupancy
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
@@ -109,7 +109,7 @@ def _get_fused_config(M, N, K):
             "GROUP_SIZE_M": 1,
             "num_warps": 4,
             "num_stages": 2,
-            "waves_per_eu": 2,
+            "waves_per_eu": 0,
             "matrix_instr_nonkdim": 16,
             "cache_modifier": None,
             "NUM_KSPLIT": 1,
