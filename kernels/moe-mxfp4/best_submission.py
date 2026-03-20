@@ -2,20 +2,26 @@
 #!POPCORN gpu MI355X
 
 """
-v160: block_m=64 for bs=512/E=33 (d=512 and d=2048), was block_m=128.
-With ~15.5 tokens/expert, block_m=64 gives better CU distribution.
+v165: Pre-allocate moe_sorting + intermediate buffers per shape.
+Bypass fused_moe wrapper, call low-level aiter ops directly with
+pre-allocated tensors to eliminate torch.empty allocation overhead.
 """
 import os
 import functools
 import torch
-from typing import Dict
+from typing import Dict, Tuple
 from task import input_t, output_t
 
-from aiter import ActivationType, QuantType
-from aiter.fused_moe import fused_moe
-import aiter.fused_moe as _fused_moe_module
 import aiter
+from aiter import ActivationType, QuantType, dtypes
+from aiter.fused_moe import (
+    moe_sorting, get_2stage_cfgs, get_padded_M, get_inter_dim,
+    fused_moe_2stages, ck_moe_stage1,
+)
+import aiter.fused_moe as _fused_moe_module
 import aiter.ops.flydsl.moe_kernels as _flydsl_moe_kernels
+from aiter.ops.triton.quant.fused_mxfp4_quant import fused_dynamic_mxfp4_quant_moe_sort
+from aiter.utility import fp4_utils
 
 # Register FlyDSL tile_k=128 kernels that aren't in server's default registration
 _flydsl_moe_kernels._KERNEL_PARAMS["flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"] = {
@@ -46,90 +52,81 @@ def _make_key(token, inter_dim, expert):
         "QuantType.per_1x32", True, False,
     )
 
-# === E=33 shapes (from v018, proven) ===
-# bs=16/E=33/d=512: cktile_moe gives 59.6us vs 88.7us baseline (-32.8%)
+# === E=33 shapes ===
 _CUSTOM_CONFIGS[_make_key(16, 512, 33)] = {
-    "block_m": 32,
-    "ksplit": 2,
-    "kernelName1": "",
-    "kernelName2": "",
+    "block_m": 32, "ksplit": 2, "kernelName1": "", "kernelName2": "",
     "run_1stage": False,
 }
 
-# bs=128/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 (v150)
-# v159: block_m=64 to reduce padding waste with ~3.9 tokens/expert
-_CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
-    "block_m": 64,
-    "ksplit": 0,
-    "kernelName1": "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16",
-    "kernelName2": "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic",
-    "run_1stage": False,
-}
-
-# === E=257 shapes (NEW in v020) ===
-# bs=16/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
-# With 144 token-expert pairs across 257 experts, most experts get 0-1 tokens.
-# Skipping activation quantization + using split-K may help.
-_CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
-    "block_m": 16,
-    "ksplit": 2,
-    "kernelName1": "",
-    "kernelName2": "",
-    "run_1stage": False,
-}
-
-# bs=128/E=257/d=256: try cktile_moe ksplit=2 (overrides tuned CSV config)
-# bs=128 has ~4.5 tokens/expert avg, similar to E=33 where ksplit=2 helped (-12.9%)
-_CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
-    "block_m": 16,
-    "ksplit": 2,
-    "kernelName1": "",
-    "kernelName2": "",
-    "run_1stage": False,
-}
-
-# === bs=512/E=33 shapes: inject 4-WG stage1 kernel ===
-# The 256x64x128x128_1x4 kernel uses 4 workgroups per CU for better utilization.
-# v037 showed d=2048: -3.2% (349->338µs). Now also try d=512 with same 4-WG kernel.
-_4WG_STAGE1 = "moe_ck2stages_gemm1_256x64x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 _4WG_STAGE1_M128 = "moe_ck2stages_gemm1_256x128x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
-
-_FLYDSL_STAGE2 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x256_atomic"
-_FLYDSL_STAGE2_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x128x128_atomic"
-_FLYDSL_STAGE2_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t32x256x128_atomic"
-_FLYDSL_STAGE2_M16_N256_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x256x128_atomic"
+_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 _FLYDSL_STAGE2_M16_N128_K128 = "flydsl_moe2_afp4_wfp4_bf16_t16x128x128_atomic"
 
+_CUSTOM_CONFIGS[_make_key(128, 512, 33)] = {
+    "block_m": 64, "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M128,
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
+    "run_1stage": False,
+}
+
+# === E=257 shapes ===
+_CUSTOM_CONFIGS[_make_key(16, 256, 257)] = {
+    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
+    "run_1stage": False,
+}
+_CUSTOM_CONFIGS[_make_key(128, 256, 257)] = {
+    "block_m": 16, "ksplit": 2, "kernelName1": "", "kernelName2": "",
+    "run_1stage": False,
+}
+
+# === bs=512 shapes ===
 _CUSTOM_CONFIGS[_make_key(512, 2048, 33)] = {
-    "block_m": 64,  # v160: was 128, try 64 for better CU distribution
-    "ksplit": 0,
+    "block_m": 64, "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=2048
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
     "run_1stage": False,
 }
-
-# === bs=512/E=33/d=512: 4-WG M128 stage1 + FlyDSL stage2 ===
-# v160: block_m=64 (was 128) for better CU distribution
 _CUSTOM_CONFIGS[_make_key(512, 512, 33)] = {
-    "block_m": 64,  # v160: was 128, try 64
-    "ksplit": 0,
+    "block_m": 64, "ksplit": 0,
     "kernelName1": _4WG_STAGE1_M128,
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v138: t16x128x128 for d=512
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
     "run_1stage": False,
 }
-
-# === bs=512/E=257: 4-WG CK stage1 + FlyDSL stage2 ===
-# v144: 4-WG (256x32x128x128_1x4) stage1 + FlyDSL stage2.
-# DSV3 tuned CSV uses 4-WG for token>=64/E=257. Block_m=32 matches CSV.
-_4WG_STAGE1_M32 = "moe_ck2stages_gemm1_256x32x128x128_1x4_MulABScaleShuffled_v3_Nswizzle0_Quant3_MulRoutedWeight0_silu_FP4X2_FP4X2_B16"
 _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
-    "block_m": 32,
-    "ksplit": 0,
-    "kernelName1": _4WG_STAGE1_M32,  # v144: 4-WG instead of 1-WG
-    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,  # v143: FlyDSL stage2
+    "block_m": 32, "ksplit": 0,
+    "kernelName1": _4WG_STAGE1_M32,
+    "kernelName2": _FLYDSL_STAGE2_M16_N128_K128,
     "run_1stage": False,
     "use_non_temporal_load": True,
 }
+
+# Pre-allocated buffer cache: shape_key -> dict of pre-allocated tensors
+_buffer_cache = {}
+
+def _get_shape_key(M, E, topk, model_dim, inter_dim, block_size_M):
+    return (M, E, topk, model_dim, inter_dim, block_size_M)
+
+def _get_or_alloc_buffers(M, E, topk, model_dim, inter_dim, block_size_M, device):
+    """Get pre-allocated buffers for the given shape, allocating on first call."""
+    key = _get_shape_key(M, E, topk, model_dim, inter_dim, block_size_M)
+    if key in _buffer_cache:
+        return _buffer_cache[key]
+
+    max_num_tokens_padded = int(M * topk + E * block_size_M - topk)
+    max_num_m_blocks = int((max_num_tokens_padded + block_size_M - 1) // block_size_M)
+
+    bufs = {
+        "sorted_ids": torch.empty(max_num_tokens_padded, dtype=dtypes.i32, device=device),
+        "sorted_weights": torch.empty(max_num_tokens_padded, dtype=dtypes.fp32, device=device),
+        "sorted_expert_ids": torch.empty(max_num_m_blocks, dtype=dtypes.i32, device=device),
+        "num_valid_ids": torch.empty(2, dtype=dtypes.i32, device=device),
+        "moe_buf": torch.empty((M, model_dim), dtype=torch.bfloat16, device=device),
+        # a2 intermediate buffer for 2-stage path
+        "a2": torch.empty((M, topk, inter_dim), dtype=torch.bfloat16, device=device),
+    }
+    _buffer_cache[key] = bufs
+    return bufs
+
 
 _injected = False
 
@@ -167,14 +164,12 @@ def _inject_configs():
         dtype, q_dtype_a, q_dtype_w, q_type, use_g1u1,
         activation, doweight_stage1, hidden_pad, intermediate_pad, is_shuffled=True,
     ):
-        # Get the original metadata
         metadata = _original_get_2stage_cfgs(
             token, model_dim, inter_dim, expert, topk,
             dtype, q_dtype_a, q_dtype_w, q_type, use_g1u1,
             activation, doweight_stage1, hidden_pad, intermediate_pad, is_shuffled,
         )
 
-        # Check if this shape has a custom NT setting
         from aiter.jit.utils.chip_info import get_cu_num
         cu_num = get_cu_num()
         keys = (
@@ -185,7 +180,6 @@ def _inject_configs():
         cfg = _fused_moe_module.cfg_2stages.get(keys)
         if cfg and cfg.get("use_non_temporal_load") is not None:
             nt = cfg["use_non_temporal_load"]
-            # Rebuild stage1 partial with NT override
             old_s1 = metadata.stage1
             if hasattr(old_s1, 'func') and old_s1.func is not None:
                 if 'use_non_temporal_load' in (old_s1.keywords or {}):
@@ -200,7 +194,6 @@ def _inject_configs():
                         metadata.has_bias,
                         nt,
                     )
-                    # Also patch stage2 if it's a CK kernel (not FlyDSL)
                     old_s2 = metadata.stage2
                     if old_s2 and hasattr(old_s2, 'keywords') and 'use_non_temporal_load' in (old_s2.keywords or {}):
                         new_kw2 = dict(old_s2.keywords)
@@ -219,6 +212,34 @@ def _inject_configs():
     _fused_moe_module.get_2stage_cfgs = _patched_get_2stage_cfgs
 
 
+def _fast_moe_sorting(topk_ids, topk_weights, num_experts, model_dim, block_size, device):
+    """Call moe_sorting with pre-allocated buffers to avoid per-call allocation."""
+    M, topk = topk_ids.shape
+    bufs = _get_or_alloc_buffers(M, num_experts, topk, model_dim, model_dim, block_size, device)
+
+    sorted_ids = bufs["sorted_ids"]
+    sorted_weights = bufs["sorted_weights"]
+    sorted_expert_ids = bufs["sorted_expert_ids"]
+    num_valid_ids = bufs["num_valid_ids"]
+    moe_buf = bufs["moe_buf"]
+
+    aiter.moe_sorting_fwd(
+        topk_ids,
+        topk_weights,
+        sorted_ids,
+        sorted_weights,
+        sorted_expert_ids,
+        num_valid_ids,
+        moe_buf,
+        num_experts,
+        int(block_size),
+        None,  # expert_mask
+        None,  # num_local_tokens
+        0,     # dispatch_policy
+    )
+    return sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_buf
+
+
 def custom_kernel(data: input_t) -> output_t:
     (
         hidden_states, gate_up_weight, down_weight,
@@ -233,15 +254,49 @@ def custom_kernel(data: input_t) -> output_t:
     hidden_pad = config["d_hidden_pad"] - config["d_hidden"]
     intermediate_pad = config["d_expert_pad"] - config["d_expert"]
 
-    output = fused_moe(
-        hidden_states, gate_up_weight_shuffled, down_weight_shuffled,
-        topk_weights, topk_ids,
-        expert_mask=None, activation=ActivationType.Silu,
-        quant_type=QuantType.per_1x32, doweight_stage1=False,
-        w1_scale=gate_up_weight_scale_shuffled,
-        w2_scale=down_weight_scale_shuffled,
-        a1_scale=None, a2_scale=None,
-        hidden_pad=hidden_pad, intermediate_pad=intermediate_pad,
+    M = hidden_states.shape[0]
+    topk = topk_ids.shape[1]
+    E, model_dim, inter_dim = get_inter_dim(
+        gate_up_weight_shuffled.shape, down_weight_shuffled.shape
     )
 
-    return output
+    padded_M = get_padded_M(M)
+    metadata = get_2stage_cfgs(
+        padded_M, model_dim, inter_dim, E, topk,
+        torch.bfloat16, dtypes.fp4x2, dtypes.fp4x2,
+        QuantType.per_1x32, True, ActivationType.Silu,
+        False, hidden_pad, intermediate_pad, True,
+    )
+
+    block_size_M = int(metadata.block_m)
+
+    # Use pre-allocated buffers for moe_sorting
+    sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_out = \
+        _fast_moe_sorting(topk_ids, topk_weights, E, model_dim, block_size_M, topk_ids.device)
+
+    # Now run the 2-stage pipeline using the standard fused_moe_2stages
+    # which handles quantization + stage1 + re-quant + stage2
+    return fused_moe_2stages(
+        hidden_states,
+        gate_up_weight_shuffled,
+        down_weight_shuffled,
+        topk,
+        sorted_ids,
+        sorted_weights,
+        sorted_expert_ids,
+        num_valid_ids,
+        moe_out,
+        True,  # isG1U1
+        block_size_M,
+        activation=ActivationType.Silu,
+        quant_type=QuantType.per_1x32,
+        doweight_stage1=False,
+        q_dtype_a=dtypes.fp4x2,
+        q_dtype_w=dtypes.fp4x2,
+        w1_scale=gate_up_weight_scale_shuffled,
+        w2_scale=down_weight_scale_shuffled,
+        a1_scale=None,
+        a2_scale=None,
+        hidden_pad=hidden_pad,
+        intermediate_pad=intermediate_pad,
+    )
