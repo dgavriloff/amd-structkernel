@@ -24,6 +24,8 @@ Your benchmark (BM) score is NOT your leaderboard (LB) score. See problem.md for
 - Input-dependent caching or precomputation that assumes data doesn't change between iterations
 - Warmup-dependent tricks (JIT compilation, lazy init) — LB has minimal warmup
 
+**CRITICAL — No buffer caching across calls**: Do NOT pre-allocate tensors in global/module-level dicts or caches that persist across calls to `custom_kernel()`. This means no `_buffer_cache = {}`, no global `torch.empty()` that gets reused, no caching of sorting buffers, intermediate activations, or quantization outputs. Every allocation must happen fresh inside each call. Reused buffers cause stale data to leak between iterations when inputs change (LB), even if they appear to work on fixed inputs (BM). This pattern caused a confirmed LB regression: BM improved but LB got worse because pre-allocated padding regions retained values from previous iterations.
+
 LB submissions are **1 per hour** — don't waste them. Only optimize in ways that are correct for arbitrary inputs on every call.
 
 ## Rules

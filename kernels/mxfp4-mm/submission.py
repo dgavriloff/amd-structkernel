@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v224: Unify M<=32 K>1024 with K<=1024 config: BSM=8 BSN=128 BSK=256
-NW=4 NS=2 cache=None waves=2. Eliminates BSM=32 BSN=64 BSK=512 NW=8
-NS=1 special case. 2x more blocks (128 vs 64 for M=32 N=4096 K=4096).
-v209 tried .cg (not None). cache=None allows L1 B-tile reuse.
+v241: M=64 two-phase: quant + _gemm_afp4wfp4_preshuffle_kernel (A4W4
+preshuffle with XCD remapping) instead of fused _gemm_a16wfp4_preshuffle.
+A4W4 preshuffle kernel has remap_xcd for 8 XCDs, .wt output stores,
+no in-loop quant overhead. For 64x7168x2048: quant is fast (64 rows),
+XCD remap distributes 224 blocks across 8 XCDs for better L2 locality.
 """
 import torch
 import triton
@@ -21,6 +22,7 @@ from aiter.ops.triton.gluon.gemm_afp4wfp4 import (
 )
 from aiter.ops.triton._triton_kernels.gemm.basic.gemm_afp4wfp4 import (
     _gemm_afp4wfp4_reduce_kernel,
+    _gemm_afp4wfp4_preshuffle_kernel,
 )
 from aiter.ops.triton.gemm.basic.gemm_afp4wfp4 import get_splitk
 
@@ -32,8 +34,10 @@ _buffers = {}
 # ASM kernel name — 32x128 is optimal for all small-M shapes per tuned CSV analysis
 _ASM_KERNEL_32x128 = "_ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E"
 
-# Threshold: use fused for M <= this value
-_FUSED_M_THRESHOLD = 64
+# Threshold: use fused A16WFP4 for M <= this value (M=64 uses A4W4 preshuffle)
+_FUSED_M_THRESHOLD = 32
+# M=64 uses two-phase: quant + A4W4 preshuffle GEMM (with XCD remapping)
+_A4W4_PRESHUFFLE_M_THRESHOLD = 64
 
 
 def _get_fused_config(M, N, K):
@@ -101,7 +105,6 @@ def _get_fused_config(M, N, K):
     else:
         # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
-        # waves_per_eu=2: hint for higher occupancy per EU
         # waves_per_eu=2: hint for higher occupancy per EU
         return {
             "BLOCK_SIZE_M": 16,
@@ -217,6 +220,93 @@ def _fused_mxfp4_quant_shuffle_kernel(
             mask=bs_mask,
             cache_modifier=".wt",
         )
+
+
+@triton.heuristics(
+    {
+        "EVEN_M_N": lambda args: args["M"] % args["BLOCK_SIZE_M"] == 0
+        and args["N"] % (args["BLOCK_SIZE_N"] * args["NUM_ITER"]) == 0,
+    }
+)
+@triton.jit
+def _mxfp4_quant_noshuffle_kernel(
+    x_ptr,
+    x_fp4_ptr,
+    bs_ptr,
+    stride_x_m_in,
+    stride_x_n_in,
+    stride_x_fp4_m_in,
+    stride_x_fp4_n_in,
+    stride_bs_m_in,
+    stride_bs_n_in,
+    M,
+    N,
+    BLOCK_SIZE_M: tl.constexpr,
+    BLOCK_SIZE_N: tl.constexpr,
+    NUM_ITER: tl.constexpr,
+    NUM_STAGES: tl.constexpr,
+    MXFP4_QUANT_BLOCK_SIZE: tl.constexpr,
+    EVEN_M_N: tl.constexpr,
+    SCALING_MODE: tl.constexpr,
+):
+    """Quant kernel that produces NON-shuffled scales (M x K/32 layout)."""
+    pid_m = tl.program_id(0)
+    start_n = tl.program_id(1) * NUM_ITER
+    stride_x_m = tl.cast(stride_x_m_in, tl.int64)
+    stride_x_n = tl.cast(stride_x_n_in, tl.int64)
+    stride_x_fp4_m = tl.cast(stride_x_fp4_m_in, tl.int64)
+    stride_x_fp4_n = tl.cast(stride_x_fp4_n_in, tl.int64)
+    stride_bs_m = tl.cast(stride_bs_m_in, tl.int64)
+    stride_bs_n = tl.cast(stride_bs_n_in, tl.int64)
+
+    NUM_QUANT_BLOCKS: tl.constexpr = BLOCK_SIZE_N // MXFP4_QUANT_BLOCK_SIZE
+
+    for pid_n in tl.range(start_n, min(start_n + NUM_ITER, N), num_stages=NUM_STAGES):
+        x_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        x_offs_n = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
+        x_offs = x_offs_m[:, None] * stride_x_m + x_offs_n[None, :] * stride_x_n
+
+        if EVEN_M_N:
+            x = tl.load(x_ptr + x_offs, cache_modifier=".cg").to(tl.float32)
+        else:
+            x_mask = (x_offs_m < M)[:, None] & (x_offs_n < N)[None, :]
+            x = tl.load(x_ptr + x_offs, mask=x_mask, cache_modifier=".cg").to(
+                tl.float32
+            )
+
+        out_tensor, bs_e8m0 = _mxfp4_quant_op(
+            x, BLOCK_SIZE_N, BLOCK_SIZE_M, MXFP4_QUANT_BLOCK_SIZE
+        )
+
+        # Store fp4 output
+        out_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        out_offs_n = pid_n * BLOCK_SIZE_N // 2 + tl.arange(0, BLOCK_SIZE_N // 2)
+        out_offs = (
+            out_offs_m[:, None] * stride_x_fp4_m + out_offs_n[None, :] * stride_x_fp4_n
+        )
+
+        if EVEN_M_N:
+            tl.store(x_fp4_ptr + out_offs, out_tensor, cache_modifier=".wt")
+        else:
+            out_mask = (out_offs_m < M)[:, None] & (out_offs_n < (N // 2))[None, :]
+            tl.store(x_fp4_ptr + out_offs, out_tensor, mask=out_mask, cache_modifier=".wt")
+
+        # Store scales WITHOUT shuffle — simple (M, K/32) layout
+        bs_offs_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
+        bs_offs_n = pid_n * NUM_QUANT_BLOCKS + tl.arange(0, NUM_QUANT_BLOCKS)
+        num_bs_cols = (N + MXFP4_QUANT_BLOCK_SIZE - 1) // MXFP4_QUANT_BLOCK_SIZE
+        bs_offs = bs_offs_m[:, None] * stride_bs_m + bs_offs_n[None, :] * stride_bs_n
+
+        if EVEN_M_N:
+            tl.store(bs_ptr + bs_offs, bs_e8m0.to(tl.uint8), cache_modifier=".wt")
+        else:
+            bs_mask = (bs_offs_m < M)[:, None] & (bs_offs_n < num_bs_cols)[None, :]
+            tl.store(
+                bs_ptr + bs_offs,
+                bs_e8m0.to(tl.uint8),
+                mask=bs_mask,
+                cache_modifier=".wt",
+            )
 
 
 def _prepare_splitk_dispatch(M, N, K, config, device):

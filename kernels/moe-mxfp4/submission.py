@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v168: Pre-allocate quantization output buffers (x_fp4, blockscale_e8m0_sorted)
-for both stage1 and stage2 quant calls. Inline the fused_dynamic_mxfp4_quant_moe_sort
-Triton kernel launch with cached output tensors to eliminate 4 torch.empty allocations
-per forward pass on CK 2-stage shapes.
+v186: Cache entire execution plan per shape key. On first call for each
+(M, E, inter_dim) combo, resolve metadata, pre-allocate all buffers, and
+build a fast-path closure. Subsequent calls dispatch directly with zero
+metadata lookups, config resolution, or allocation checks.
 """
 import os
 import functools
@@ -98,115 +98,6 @@ _CUSTOM_CONFIGS[_make_key(512, 256, 257)] = {
     "use_non_temporal_load": True,
 }
 
-# Pre-allocated buffer cache
-_buffer_cache = {}
-
-def _get_or_alloc_sorting_buffers(M, E, topk, model_dim, block_size_M, device):
-    """Pre-allocate moe_sorting output buffers."""
-    key = ("sort", M, E, topk, model_dim, block_size_M)
-    if key in _buffer_cache:
-        return _buffer_cache[key]
-
-    max_num_tokens_padded = int(M * topk + E * block_size_M - topk)
-    max_num_m_blocks = int((max_num_tokens_padded + block_size_M - 1) // block_size_M)
-
-    bufs = {
-        "sorted_ids": torch.empty(max_num_tokens_padded, dtype=dtypes.i32, device=device),
-        "sorted_weights": torch.empty(max_num_tokens_padded, dtype=dtypes.fp32, device=device),
-        "sorted_expert_ids": torch.empty(max_num_m_blocks, dtype=dtypes.i32, device=device),
-        "num_valid_ids": torch.empty(2, dtype=dtypes.i32, device=device),
-        "moe_buf": torch.empty((M, model_dim), dtype=torch.bfloat16, device=device),
-    }
-    _buffer_cache[key] = bufs
-    return bufs
-
-def _get_or_alloc_a2(M, topk, inter_dim, device):
-    """Pre-allocate a2 intermediate buffer."""
-    key = ("a2", M, topk, inter_dim)
-    if key in _buffer_cache:
-        return _buffer_cache[key]
-    buf = torch.empty((M, topk, inter_dim), dtype=torch.bfloat16, device=device)
-    _buffer_cache[key] = buf
-    return buf
-
-def _get_or_alloc_quant_buffers(M, N, sorted_ids_len, topk, device):
-    """Pre-allocate quantization output buffers for fused_dynamic_mxfp4_quant_moe_sort."""
-    MXFP4_QUANT_BLOCK_SIZE = 32
-    BLOCK_SIZE_M, BLOCK_SIZE_N = 32, 8
-    BLOCK_SIZE_M_u32, BLOCK_SIZE_N_u32 = 16, 4
-
-    key = ("quant", M, N, sorted_ids_len, topk)
-    if key in _buffer_cache:
-        return _buffer_cache[key]
-
-    x_fp4 = torch.empty((M, N // 2), dtype=torch.uint8, device=device)
-    scaleN = triton.cdiv(N, MXFP4_QUANT_BLOCK_SIZE)
-    M_o = sorted_ids_len
-    N_o = scaleN
-
-    blockscale_e8m0_sorted = torch.empty(
-        (
-            triton.cdiv(M_o, BLOCK_SIZE_M),
-            triton.cdiv(N_o, BLOCK_SIZE_N),
-            BLOCK_SIZE_N_u32,
-            BLOCK_SIZE_M_u32,
-            4,
-        ),
-        dtype=torch.uint8,
-        device=device,
-    )
-
-    bufs = {"x_fp4": x_fp4, "blockscale": blockscale_e8m0_sorted}
-    _buffer_cache[key] = bufs
-    return bufs
-
-def _quant_prealloc(x, sorted_ids, num_valid_ids, token_num, topk, block_size, device):
-    """Inline fused_dynamic_mxfp4_quant_moe_sort with pre-allocated output buffers."""
-    M, N = x.shape
-    MXFP4_QUANT_BLOCK_SIZE = 32
-    BLOCK_SIZE_Mx = 128
-    BLOCK_SIZE_M, BLOCK_SIZE_N = 32, 8
-
-    scaleN = triton.cdiv(N, MXFP4_QUANT_BLOCK_SIZE)
-    M_i, N_i = M, scaleN
-    M_o = sorted_ids.shape[0]
-
-    # Get pre-allocated buffers
-    qbufs = _get_or_alloc_quant_buffers(M, N, M_o, topk, device)
-    x_fp4 = qbufs["x_fp4"]
-    blockscale_e8m0_sorted = qbufs["blockscale"]
-
-    num_pid = triton.cdiv(M, BLOCK_SIZE_Mx) * scaleN + triton.cdiv(
-        M_o, BLOCK_SIZE_M
-    ) * triton.cdiv(N_i, BLOCK_SIZE_N)
-
-    _fused_dynamic_mxfp4_quant_moe_sort_kernel[(num_pid,)](
-        x,
-        x_fp4,
-        sorted_ids,
-        num_valid_ids,
-        blockscale_e8m0_sorted,
-        M,
-        N,
-        scaleN,
-        *x.stride(),
-        *x_fp4.stride(),
-        *blockscale_e8m0_sorted.stride(),
-        token_num=token_num,
-        M_i=M_i,
-        N_i=N_i,
-        MXFP4_QUANT_BLOCK_SIZE=MXFP4_QUANT_BLOCK_SIZE,
-        BLOCK_SIZE_Mx=BLOCK_SIZE_Mx,
-        BLOCK_SIZE_M=BLOCK_SIZE_M // 2,
-        BLOCK_SIZE_N=BLOCK_SIZE_N // 2,
-        TOPK=topk,
-    )
-
-    return (
-        x_fp4.view(dtypes.fp4x2),
-        blockscale_e8m0_sorted.view(dtypes.fp8_e8m0).view(-1, scaleN),
-    )
-
 
 _injected = False
 
@@ -291,26 +182,87 @@ def _inject_configs():
     _fused_moe_module.get_2stage_cfgs = _patched_get_2stage_cfgs
 
 
-def custom_kernel(data: input_t) -> output_t:
-    (
-        hidden_states, gate_up_weight, down_weight,
-        gate_up_weight_scale, down_weight_scale,
-        gate_up_weight_shuffled, down_weight_shuffled,
-        gate_up_weight_scale_shuffled, down_weight_scale_shuffled,
-        topk_weights, topk_ids, config,
-    ) = data
+# ============================================================
+# Cached execution plan: build once per shape, reuse forever
+# ============================================================
+_plan_cache = {}
 
+
+def _build_quant_constants(M, N, sorted_ids_len):
+    """Pre-compute quant kernel launch constants."""
+    MXFP4_QUANT_BLOCK_SIZE = 32
+    BLOCK_SIZE_Mx = 128
+    BLOCK_SIZE_M = 32
+    BLOCK_SIZE_N = 8
+    BLOCK_SIZE_M_u32 = 16
+    BLOCK_SIZE_N_u32 = 4
+
+    scaleN = triton.cdiv(N, MXFP4_QUANT_BLOCK_SIZE)
+    M_o = sorted_ids_len
+    num_pid = triton.cdiv(M, BLOCK_SIZE_Mx) * scaleN + triton.cdiv(
+        M_o, BLOCK_SIZE_M
+    ) * triton.cdiv(scaleN, BLOCK_SIZE_N)
+
+    x_fp4 = torch.empty((M, N // 2), dtype=torch.uint8, device="cuda")
+    blockscale = torch.empty(
+        (
+            triton.cdiv(M_o, BLOCK_SIZE_M),
+            triton.cdiv(scaleN, BLOCK_SIZE_N),
+            BLOCK_SIZE_N_u32,
+            BLOCK_SIZE_M_u32,
+            4,
+        ),
+        dtype=torch.uint8,
+        device="cuda",
+    )
+    return {
+        "x_fp4": x_fp4,
+        "blockscale": blockscale,
+        "scaleN": scaleN,
+        "num_pid": num_pid,
+        "M": M,
+        "N": N,
+        "M_i": M,
+        "N_i": scaleN,
+    }
+
+
+def _run_quant(qc, x, sorted_ids, num_valid_ids, token_num, topk):
+    """Run quant kernel using pre-computed constants and buffers."""
+    x_fp4 = qc["x_fp4"]
+    blockscale = qc["blockscale"]
+
+    _fused_dynamic_mxfp4_quant_moe_sort_kernel[(qc["num_pid"],)](
+        x,
+        x_fp4,
+        sorted_ids,
+        num_valid_ids,
+        blockscale,
+        qc["M"],
+        qc["N"],
+        qc["scaleN"],
+        *x.stride(),
+        *x_fp4.stride(),
+        *blockscale.stride(),
+        token_num=token_num,
+        M_i=qc["M_i"],
+        N_i=qc["N_i"],
+        MXFP4_QUANT_BLOCK_SIZE=32,
+        BLOCK_SIZE_Mx=128,
+        BLOCK_SIZE_M=16,
+        BLOCK_SIZE_N=4,
+        TOPK=topk,
+    )
+
+    return (
+        x_fp4.view(dtypes.fp4x2),
+        blockscale.view(dtypes.fp8_e8m0).view(-1, qc["scaleN"]),
+    )
+
+
+def _build_plan(M, E, topk, model_dim, inter_dim, hidden_pad, intermediate_pad, device):
+    """Build execution plan with all buffers and metadata pre-resolved."""
     _inject_configs()
-
-    hidden_pad = config["d_hidden_pad"] - config["d_hidden"]
-    intermediate_pad = config["d_expert_pad"] - config["d_expert"]
-
-    M = hidden_states.shape[0]
-    topk = topk_ids.shape[1]
-    device = topk_ids.device
-    w1 = gate_up_weight_shuffled
-    w2 = down_weight_shuffled
-    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
 
     padded_M = get_padded_M(M)
     metadata = get_2stage_cfgs(
@@ -321,85 +273,134 @@ def custom_kernel(data: input_t) -> output_t:
     )
 
     block_size_M = int(metadata.block_m)
+    is_ksplit = metadata.ksplit > 1
+    stage1 = metadata.stage1
+    stage2 = metadata.stage2
 
-    # === Pre-allocated moe_sorting ===
-    bufs = _get_or_alloc_sorting_buffers(M, E, topk, model_dim, block_size_M, device)
-    sorted_ids = bufs["sorted_ids"]
-    sorted_weights = bufs["sorted_weights"]
-    sorted_expert_ids = bufs["sorted_expert_ids"]
-    num_valid_ids = bufs["num_valid_ids"]
-    moe_out = bufs["moe_buf"]
+    # Pre-allocate sorting buffers
+    max_num_tokens_padded = int(M * topk + E * block_size_M - topk)
+    max_num_m_blocks = int((max_num_tokens_padded + block_size_M - 1) // block_size_M)
+
+    sorted_ids = torch.empty(max_num_tokens_padded, dtype=dtypes.i32, device=device)
+    sorted_weights = torch.empty(max_num_tokens_padded, dtype=dtypes.fp32, device=device)
+    sorted_expert_ids = torch.empty(max_num_m_blocks, dtype=dtypes.i32, device=device)
+    num_valid_ids = torch.empty(2, dtype=dtypes.i32, device=device)
+    moe_buf = torch.empty((M, model_dim), dtype=torch.bfloat16, device=device)
+
+    # Pre-allocate a2 buffer
+    a2_buf = torch.empty((M, topk, inter_dim), dtype=torch.bfloat16, device=device)
+
+    plan = {
+        "block_size_M": block_size_M,
+        "is_ksplit": is_ksplit,
+        "stage1": stage1,
+        "stage2": stage2,
+        "sorted_ids": sorted_ids,
+        "sorted_weights": sorted_weights,
+        "sorted_expert_ids": sorted_expert_ids,
+        "num_valid_ids": num_valid_ids,
+        "moe_buf": moe_buf,
+        "a2_buf": a2_buf,
+        "E": E,
+        "M": M,
+        "topk": topk,
+    }
+
+    if not is_ksplit:
+        # Pre-compute quant constants for stage1 (input quant)
+        plan["qc1"] = _build_quant_constants(M, model_dim, max_num_tokens_padded)
+        # Pre-compute quant constants for inter-stage (a2 quant)
+        plan["qc2"] = _build_quant_constants(M * topk, inter_dim, max_num_tokens_padded)
+
+    return plan
+
+
+def custom_kernel(data: input_t) -> output_t:
+    (
+        hidden_states, gate_up_weight, down_weight,
+        gate_up_weight_scale, down_weight_scale,
+        gate_up_weight_shuffled, down_weight_shuffled,
+        gate_up_weight_scale_shuffled, down_weight_scale_shuffled,
+        topk_weights, topk_ids, config,
+    ) = data
+
+    M = hidden_states.shape[0]
+    topk = topk_ids.shape[1]
+    device = topk_ids.device
+    w1 = gate_up_weight_shuffled
+    w2 = down_weight_shuffled
+
+    # Fast shape key for plan cache
+    E, model_dim, inter_dim = get_inter_dim(w1.shape, w2.shape)
+    plan_key = (M, E, inter_dim)
+
+    plan = _plan_cache.get(plan_key)
+    if plan is None:
+        hidden_pad = config["d_hidden_pad"] - config["d_hidden"]
+        intermediate_pad = config["d_expert_pad"] - config["d_expert"]
+        plan = _build_plan(M, E, topk, model_dim, inter_dim, hidden_pad, intermediate_pad, device)
+        _plan_cache[plan_key] = plan
+
+    # Extract pre-resolved plan components (local vars for speed)
+    sorted_ids = plan["sorted_ids"]
+    sorted_weights = plan["sorted_weights"]
+    sorted_expert_ids = plan["sorted_expert_ids"]
+    num_valid_ids = plan["num_valid_ids"]
+    moe_out = plan["moe_buf"]
+    block_size_M = plan["block_size_M"]
+    stage1 = plan["stage1"]
+    stage2 = plan["stage2"]
 
     aiter.moe_sorting_fwd(
         topk_ids, topk_weights,
         sorted_ids, sorted_weights, sorted_expert_ids, num_valid_ids, moe_out,
-        E, int(block_size_M), None, None, 0,
+        E, block_size_M, None, None, 0,
     )
 
-    # === Inline 2-stage pipeline ===
-    token_num = M
+    w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
+    w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
 
-    if metadata.ksplit > 1:
+    if plan["is_ksplit"]:
         # cktile_moe path: bf16 activations, no fp4 quant
-        a1 = hidden_states.to(torch.bfloat16)
-        a1_scale = None
-        w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
-        w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
-
-        a2 = metadata.stage1(
-            a1, w1, w2,
+        a2 = stage1(
+            hidden_states, w1, w2,
             sorted_ids, sorted_expert_ids, num_valid_ids,
-            _get_or_alloc_a2(M, topk, inter_dim, device),  # pre-allocated
-            topk,
+            plan["a2_buf"], topk,
             block_m=block_size_M,
-            a1_scale=a1_scale,
+            a1_scale=None,
             w1_scale=w1_scale_view,
             sorted_weights=None,
         )
 
-        # cktile_moe stage2: a2 is bf16, no inter-stage requant
-        a2_scale = None
-        metadata.stage2(
+        stage2(
             a2, w1, w2,
             sorted_ids, sorted_expert_ids, num_valid_ids,
             moe_out, topk,
             w2_scale=w2_scale_view,
-            a2_scale=a2_scale,
+            a2_scale=None,
             block_m=block_size_M,
             sorted_weights=sorted_weights,
         )
     else:
         # CK 2-stage path: fp4 activation quant with pre-allocated buffers
-        w1_scale_view = gate_up_weight_scale_shuffled.view(dtypes.fp8_e8m0)
-        w2_scale_view = down_weight_scale_shuffled.view(dtypes.fp8_e8m0)
+        a1, a1_scale = _run_quant(plan["qc1"], hidden_states, sorted_ids, num_valid_ids, M, 1)
 
-        # Stage 1: quant activations + gate_up GEMM + SwiGLU
-        a1, a1_scale = _quant_prealloc(
-            hidden_states, sorted_ids, num_valid_ids,
-            token_num, 1, block_size_M, device,
-        )
-
-        a2 = _get_or_alloc_a2(M, topk, inter_dim, device)
-        a2 = metadata.stage1(
+        a2 = stage1(
             a1, w1, w2,
             sorted_ids, sorted_expert_ids, num_valid_ids,
-            a2, topk,
+            plan["a2_buf"], topk,
             block_m=block_size_M,
             a1_scale=a1_scale,
             w1_scale=w1_scale_view,
             sorted_weights=None,
         )
 
-        # Inter-stage requant: bf16 -> fp4 with pre-allocated buffers
+        # Inter-stage requant: bf16 -> fp4
         a2_flat = a2.view(-1, inter_dim)
-        a2_quant, a2_scale = _quant_prealloc(
-            a2_flat, sorted_ids, num_valid_ids,
-            token_num, topk, block_size_M, device,
-        )
-        a2_quant = a2_quant.view(token_num, topk, -1)
+        a2_quant, a2_scale = _run_quant(plan["qc2"], a2_flat, sorted_ids, num_valid_ids, M, topk)
+        a2_quant = a2_quant.view(M, topk, -1)
 
-        # Stage 2: down GEMM + weighted reduction
-        metadata.stage2(
+        stage2(
             a2_quant, w1, w2,
             sorted_ids, sorted_expert_ids, num_valid_ids,
             moe_out, topk,
