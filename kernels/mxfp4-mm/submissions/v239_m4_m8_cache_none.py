@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v224: Unify M<=32 K>1024 with K<=1024 config: BSM=8 BSN=128 BSK=256
-NW=4 NS=2 cache=None waves=2. Eliminates BSM=32 BSN=64 BSK=512 NW=8
-NS=1 special case. 2x more blocks (128 vs 64 for M=32 N=4096 K=4096).
-v209 tried .cg (not None). cache=None allows L1 B-tile reuse.
+v239: Unify all non-split-K fused paths to cache=None. M<=4 and M<=8
+change from .cg to None. M<=32 and M=64 already use None. v236 tested
+M<=4 alone (+0.1%). v213 tested both M<=4+M<=8 (+1.5%). Testing both
+on current base — M<=8 alone never tested. L1 caching may help B-tile
+reuse within K-iterations for small-M shapes.
 """
 import torch
 import triton
@@ -66,7 +67,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 0,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": ".cg",
+            "cache_modifier": None,
             "NUM_KSPLIT": 1,
         }
     elif M <= 8:
@@ -79,7 +80,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 0,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": ".cg",
+            "cache_modifier": None,
             "NUM_KSPLIT": 1,
         }
     elif M <= 32:
@@ -101,7 +102,6 @@ def _get_fused_config(M, N, K):
     else:
         # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
-        # waves_per_eu=2: hint for higher occupancy per EU
         # waves_per_eu=2: hint for higher occupancy per EU
         return {
             "BLOCK_SIZE_M": 16,

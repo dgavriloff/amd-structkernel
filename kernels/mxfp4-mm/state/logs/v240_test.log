@@ -1,0 +1,259 @@
+Submitting to leaderboard: amd-mxfp4-mm
+GPU: MI355X
+Mode: test
+File: submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+{"status": "processing", "elapsed_time": 15.0}
+{"status": "processing", "elapsed_time": 30.67}
+{"status": "processing", "elapsed_time": 45.7}
+{"status": "processing", "elapsed_time": 60.73}
+{"status": "processing", "elapsed_time": 75.76}
+{"status": "processing", "elapsed_time": 90.79}
+STDOUT (Run 1):
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/f4gemm/f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128.co GetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E
+[aiter] hipModuleGetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E Success
+
+STDERR (Run 1):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] start build [module_gemm_a4w4_asm] under /home/runner/aiter/aiter/jit/build/module_gemm_a4w4_asm
+/home/runner/aiter/hsa/codegen.py:13: Pandas4Warning: 'future.no_silent_downcasting' is deprecated, please refrain from using it.
+  pd.set_option("future.no_silent_downcasting", True)
+/home/runner/aiter/hsa/codegen.py:86: Pandas4Warning: The copy keyword is deprecated and will be removed in a future version. Copy-on-Write is active in pandas since 3.0 which utilizes a lazy copy mechanism that defers copies until necessary. Use .copy() to make an eager copy if necessary.
+  pd.concat(dfs, ignore_index=True).fillna(0).infer_objects(copy=False)
+[aiter] [32mfinish build [module_gemm_a4w4_asm], cost 23.3s [0m
+[aiter] import [module_gemm_a4w4_asm] under /home/runner/aiter/aiter/jit/module_gemm_a4w4_asm.so
+[aiter] type hints mismatch, override to --> gemm_a4w4_asm(A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor, out: torch.Tensor, kernelName: str, bias: Optional[torch.Tensor] = None, alpha: float | Optional[typing.SupportsIndex] = 1.0, beta: float | Optional[typing.SupportsIndex] = 0.0, bpreshuffle: Optional[bool] = True, log2_k_split: int | Optional[typing.SupportsIndex] = None) -> torch.Tensor
+multiprocessing.pool.RemoteTraceback: 
+"""
+Traceback (most recent call last):
+  File "/usr/local/lib/python3.12/dist-packages/triton/language/core.py", line 43, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/language/core.py", line 2167, in load
+    return _semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/language/semantic.py", line 1080, in load
+    cache = self._str_to_load_cache_modifier(cache_modifier)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/language/semantic.py", line 915, in _str_to_load_cache_modifier
+    raise ValueError(f"Cache modifier {cache_modifier} not supported")
+ValueError: Cache modifier .cs not supported
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 162, in _run_single_test
+    submission_output = custom_kernel(_clone_data(data))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/submission.py", line 435, in custom_kernel
+    _gemm_a16wfp4_preshuffle_kernel[(buf['grid_size'],)](
+  File "/usr/local/lib/python3.12/dist-packages/triton/runtime/jit.py", line 370, in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/runtime/autotuner.py", line 459, in run
+    return self.fn.run(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/runtime/jit.py", line 720, in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/runtime/jit.py", line 849, in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/compiler/compiler.py", line 304, in compile
+    module = src.make_ir(target, options, codegen_fns, module_map, context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/triton/compiler/compiler.py", line 80, in make_ir
+    return ast_to_ttir(self.fn, self, context=context, options=options, codegen_fns=codegen_fns,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+triton.compiler.errors.CompilationError: at 108:16:
+        # B scales are N x K even though B operand is K x N.
+        b_scale_ptrs = (
+            b_scales_ptr
+            + offs_bsn[:, None] * stride_bsn
+            + offs_ks[None, :] * stride_bsk
+        )
+
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
+            b_scales = (
+                tl.load(b_scale_ptrs, cache_modifier=cache_modifier)
+                ^
+Cache modifier .cs not supported
+"""
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 387, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 357, in main
+    return run_testing(logger, pool, tests)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 186, in run_testing
+    good, message = run_single_test(pool, test)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/runner/_work/kernelbot/kernelbot/eval.py", line 171, in run_single_test
+    return pool.apply(_run_single_test, (test,))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 360, in apply
+    return self.apply_async(func, args, kwds).get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/multiprocessing/pool.py", line 774, in get
+    raise self._value
+triton.compiler.errors.CompilationError: at 108:16:
+        # B scales are N x K even though B operand is K x N.
+        b_scale_ptrs = (
+            b_scales_ptr
+            + offs_bsn[:, None] * stride_bsn
+            + offs_ks[None, :] * stride_bsk
+        )
+
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
+            b_scales = (
+                tl.load(b_scale_ptrs, cache_modifier=cache_modifier)
+                ^
+Cache modifier .cs not supported
+
+
+"**MI355X on GitHub ✅ success**
+> Workflow [23359091744](<https://github.com/gpu-mode/kernelbot/actions/runs/23359091744>) completed
+> Downloading artifacts... done
+> ❌ Running tests failed (internal error 1)
+
+Running on:
+* GPU: `AMD Instinct MI355X`
+* CPU: `AMD EPYC 9575F 64-Core Processor`
+* Device count: `1`
+* Runtime: `ROCm`
+* Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
+* Torch: `2.10.0+rocm7.1`
+* Hostname: `arc-runner-set-h82gb-runner-zr745`
+# Running failed
+Command ```bash
+python3 eval.py test /tmp/tmp8nc3wim5```
+exited with error code **1** after 30.06 seconds.
+
+## Program stderr:
+```
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] start build [module_gemm_a4w4_asm] under /home/runner/aiter/aiter/jit/build/module_gemm_a4w4_asm
+/home/runner/aiter/hsa/codegen.py:13: Pandas4Warning: 'future.no_silent_downcasting' is deprecated, please refrain from using it.
+  pd.set_option(\"future.no_silent_downcasting\", True)
+/home/runner/aiter/hsa/codegen.py:86: Pandas4Warning: The copy keyword is deprecated and will be removed in a future version. Copy-on-Write is active in pandas since 3.0 which utilizes a lazy copy mechanism that defers copies until necessary. Use .copy() to make an eager copy if necessary.
+  pd.concat(dfs, ignore_index=True).fillna(0).infer_objects(copy=False)
+[aiter] \u001b[32mfinish build [module_gemm_a4w4_asm], cost 23.3s \u001b[0m
+[aiter] import [module_gemm_a4w4_asm] under /home/runner/aiter/aiter/jit/module_gemm_a4w4_asm.so
+[aiter] type hints mismatch, override to --> gemm_a4w4_asm(A: torch.Tensor, B: torch.Tensor, A_scale: torch.Tensor, B_scale: torch.Tensor, out: torch.Tensor, kernelName: str, bias: Optional[torch.Tensor] = None, alpha: float | Optional[typing.SupportsIndex] = 1.0, beta: float | Optional[typing.SupportsIndex] = 0.0, bpreshuffle: Optional[bool] = True, log2_k_split: int | Optional[typing.SupportsIndex] = None) -> torch.Tensor
+multiprocessing.pool.RemoteTraceback: 
+\"\"\"
+Traceback (most recent call last):
+  File \"/usr/local/lib/python3.12/dist-packages/triton/language/core.py\", line 43, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/language/core.py\", line 2167, in load
+    return _semantic.load(pointer, mask, other, boundary_check, padding_option, cache_modifier, eviction_policy,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/language/semantic.py\", line 1080, in load
+    cache = self._str_to_load_cache_modifier(cache_modifier)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/language/semantic.py\", line 915, in _str_to_load_cache_modifier
+    raise ValueError(f\"Cache modifier {cache_modifier} not supported\")
+ValueError: Cache modifier .cs not supported
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 125, in worker
+    result = (True, func(*args, **kwds))
+                    ^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 162, in _run_single_test
+    submission_output = custom_kernel(_clone_data(data))
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/submission.py\", line 435, in custom_kernel
+    _gemm_a16wfp4_preshuffle_kernel[(buf['grid_size'],)](
+  File \"/usr/local/lib/python3.12/dist-packages/triton/runtime/jit.py\", line 370, in <lambda>
+    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)
+                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/runtime/autotuner.py\", line 459, in run
+    return self.fn.run(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/runtime/jit.py\", line 720, in run
+    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/runtime/jit.py\", line 849, in _do_compile
+    kernel = self.compile(src, target=target, options=options.__dict__)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/compiler/compiler.py\", line 304, in compile
+    module = src.make_ir(target, options, codegen_fns, module_map, context)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/local/lib/python3.12/dist-packages/triton/compiler/compiler.py\", line 80, in make_ir
+    return ast_to_ttir(self.fn, self, context=context, options=options, codegen_fns=codegen_fns,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+triton.compiler.errors.CompilationError: at 108:16:
+        # B scales are N x K even though B operand is K x N.
+        b_scale_ptrs = (
+            b_scales_ptr
+            + offs_bsn[:, None] * stride_bsn
+            + offs_ks[None, :] * stride_bsk
+        )
+
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
+            b_scales = (
+                tl.load(b_scale_ptrs, cache_modifier=cache_modifier)
+                ^
+Cache modifier .cs not supported
+\"\"\"
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 387, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 357, in main
+    return run_testing(logger, pool, tests)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 186, in run_testing
+    good, message = run_single_test(pool, test)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/home/runner/_work/kernelbot/kernelbot/eval.py\", line 171, in run_single_test
+    return pool.apply(_run_single_test, (test,))
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 360, in apply
+    return self.apply_async(func, args, kwds).get()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File \"/usr/lib/python3.12/multiprocessing/pool.py\", line 774, in get
+    raise self._value
+triton.compiler.errors.CompilationError: at 108:16:
+        # B scales are N x K even though B operand is K x N.
+        b_scale_ptrs = (
+            b_scales_ptr
+            + offs_bsn[:, None] * stride_bsn
+            + offs_ks[None, :] * stride_bsk
+        )
+
+        accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
+
+        for k in range(pid_k * num_k_iter, (pid_k + 1) * num_k_iter):
+            b_scales = (
+                tl.load(b_scale_ptrs, cache_modifier=cache_modifier)
+                ^
+Cache modifier .cs not supported```
+
+## Program stdout:
+```
+[aiter] hipModuleLoad: /home/runner/aiter/hsa//gfx950/f4gemm/f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128.co GetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E
+[aiter] hipModuleGetFunction: _ZN5aiter41f4gemm_bf16_per1x32Fp4_BpreShuffle_32x128E Success```"

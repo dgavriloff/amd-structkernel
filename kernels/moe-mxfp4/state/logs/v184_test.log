@@ -1,0 +1,86 @@
+Submitting to leaderboard: amd-moe-mxfp4
+GPU: MI355X
+Mode: test
+File: submission.py
+
+Waiting for results...
+{"status": "processing", "elapsed_time": 0.0}
+{"status": "processing", "elapsed_time": 15.0}
+{"status": "processing", "elapsed_time": 30.3}
+{"status": "processing", "elapsed_time": 45.3}
+{"status": "processing", "elapsed_time": 60.6}
+{"status": "processing", "elapsed_time": 75.6}
+{"status": "processing", "elapsed_time": 90.6}
+{"status": "processing", "elapsed_time": 105.61}
+{"status": "processing", "elapsed_time": 121.22}
+{"status": "processing", "elapsed_time": 136.23}
+{"status": "processing", "elapsed_time": 152.07}
+{"status": "processing", "elapsed_time": 167.07}
+{"status": "processing", "elapsed_time": 182.29}
+{"status": "processing", "elapsed_time": 197.29}
+{"status": "processing", "elapsed_time": 212.29}
+STDERR (Run 1):
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 0
+[aiter] [fused_moe] using 2stage default for (256, 8, 4096, 1024, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] [32mfinish build [module_moe_sorting], cost 25.1s [0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+[aiter] start build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/build/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_
+[aiter] [32mfinish build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_], cost 113.4s [0m
+[aiter] import [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_.so
+[aiter] type hints mismatch, override to --> ck_moe_stage1(hidden_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w1_scale: Optional[torch.Tensor] = None, a1_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+[aiter] type hints mismatch, override to --> ck_moe_stage2(inter_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w2_scale: Optional[torch.Tensor] = None, a2_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 8
+[aiter] [fused_moe] using 2stage default for (256, 32, 7168, 2048, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 64 use_nt = True, estimated_m_per_expert = 13
+[aiter] [fused_moe] using 2stage default for (256, 128, 4096, 1536, 65, 7, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+
+
+"**MI355X on GitHub ✅ success**
+> Workflow [23358384116](<https://github.com/gpu-mode/kernelbot/actions/runs/23358384116>) completed
+> Downloading artifacts... done
+> ✅ Testing successful
+
+Running on:
+* GPU: `AMD Instinct MI355X`
+* CPU: `AMD EPYC 9575F 64-Core Processor`
+* Device count: `1`
+* Runtime: `ROCm`
+* Platform: `Linux-6.8.0-60-generic-x86_64-with-glibc2.39`
+* Torch: `2.10.0+rocm7.1`
+* Hostname: `arc-runner-set-h82gb-runner-45hls`
+
+
+## ✅ Passed 3/3 tests:
+```
+✅ bs: 8; seed: 9371; dexpert: 1024; dhidden: 4096; nroutedexperts: 256; nsharedexperts: 1; nexpertspertoken: 8
+> Maximum error: 0.015625
+✅ bs: 32; seed: 2291; dexpert: 2048; dhidden: 7168; nroutedexperts: 32; nsharedexperts: 1; nexpertspertoken: 8
+> Maximum error: 0.015625
+✅ bs: 128; seed: 81934; dexpert: 1536; dhidden: 4096; nroutedexperts: 64; nsharedexperts: 1; nexpertspertoken: 6
+> Maximum error: 0.015625```
+
+## Program stderr:
+```
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] import [module_aiter_enum] under /home/runner/aiter/aiter/jit/module_aiter_enum.so
+[aiter] merge tuned file under model_configs/ and configs/ /home/runner/aiter/aiter/configs/tuned_fmoe.csv:/home/runner/aiter/aiter/configs/model_configs/a8w8_blockscale_tuned_fmoe_qwen3_235b.csv:/home/runner/aiter/aiter/configs/model_configs/dsv3_fp4_tuned_fmoe.csv
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 0
+[aiter] [fused_moe] using 2stage default for (256, 8, 4096, 1024, 257, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] start build [module_moe_sorting] under /home/runner/aiter/aiter/jit/build/module_moe_sorting
+[aiter] \u001b[32mfinish build [module_moe_sorting], cost 25.1s \u001b[0m
+[aiter] import [module_moe_sorting] under /home/runner/aiter/aiter/jit/module_moe_sorting.so
+[aiter] type hints mismatch, override to --> moe_sorting_fwd(topk_ids: torch.Tensor, topk_weights: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_weights: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, moe_buf: torch.Tensor, num_experts: int | typing.SupportsIndex, unit_size: int | typing.SupportsIndex, local_expert_mask: Optional[torch.Tensor] = None, num_local_tokens: Optional[torch.Tensor] = None, dispatch_policy: int | typing.SupportsIndex = 0) -> None
+[aiter] start build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/build/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_
+[aiter] \u001b[32mfinish build [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_], cost 113.4s \u001b[0m
+[aiter] import [module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_] under /home/runner/aiter/aiter/jit/module_moe_ck2stages_fp4x2_fp4x2_preshuffle_on_b16_silu_per_1x32_mulWeightStage2_.so
+[aiter] type hints mismatch, override to --> ck_moe_stage1(hidden_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w1_scale: Optional[torch.Tensor] = None, a1_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+[aiter] type hints mismatch, override to --> ck_moe_stage2(inter_states: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor, sorted_token_ids: torch.Tensor, sorted_expert_ids: torch.Tensor, num_valid_ids: torch.Tensor, out: torch.Tensor, topk: int | typing.SupportsIndex, kernelName: str = None, w2_scale: Optional[torch.Tensor] = None, a2_scale: Optional[torch.Tensor] = None, block_m: int | Optional[typing.SupportsIndex] = 32, sorted_weights: Optional[torch.Tensor] = None, quant_type: int | typing.SupportsIndex = 0, activation: int | typing.SupportsIndex = 0, splitk: int | Optional[typing.SupportsIndex] = 1, non_temporal_load: bool = False, dst_type: Optional[str] = None, is_shuffled: bool = True) -> None
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 32 use_nt = True, estimated_m_per_expert = 8
+[aiter] [fused_moe] using 2stage default for (256, 32, 7168, 2048, 33, 9, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False) 
+[aiter] run_1stage = False, ksplit = 0 q_type = QuantType.per_1x32 block_m = 64 use_nt = True, estimated_m_per_expert = 13
+[aiter] [fused_moe] using 2stage default for (256, 128, 4096, 1536, 65, 7, 'ActivationType.Silu', 'torch.bfloat16', 'torch.float4_e2m1fn_x2', 'torch.float4_e2m1fn_x2', 'QuantType.per_1x32', True, False)```"

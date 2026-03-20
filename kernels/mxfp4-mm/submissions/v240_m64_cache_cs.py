@@ -2,10 +2,10 @@
 #!POPCORN gpu MI355X
 
 """
-v224: Unify M<=32 K>1024 with K<=1024 config: BSM=8 BSN=128 BSK=256
-NW=4 NS=2 cache=None waves=2. Eliminates BSM=32 BSN=64 BSK=512 NW=8
-NS=1 special case. 2x more blocks (128 vs 64 for M=32 N=4096 K=4096).
-v209 tried .cg (not None). cache=None allows L1 B-tile reuse.
+v240: cache_modifier=.cs for M=64 fused path (from None). .cs marks B
+loads with LRU eviction in L1 cache. B tiles not reused across K-iters,
+so LRU eviction prevents B data from evicting A data/scales in L1.
+.cs as a load modifier never tested for any fused shape.
 """
 import torch
 import triton
@@ -102,7 +102,7 @@ def _get_fused_config(M, N, K):
         # M=64 (64x7168x2048): BSM=16 BSN=128 BSK=256 NW=4 NS=2
         # 4*56=224 blocks, 8 K-iters with pipelining
         # waves_per_eu=2: hint for higher occupancy per EU
-        # waves_per_eu=2: hint for higher occupancy per EU
+        # .cs: LRU B loads (not reused across K-iters)
         return {
             "BLOCK_SIZE_M": 16,
             "BLOCK_SIZE_N": 128,
@@ -112,7 +112,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": None,
+            "cache_modifier": ".cs",
             "NUM_KSPLIT": 1,
         }
 
