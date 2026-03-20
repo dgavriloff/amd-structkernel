@@ -2,3 +2,4 @@
 {"action": "submit", "mode": "test", "v": 93, "result": "pass", "ts": "2026-03-20T14:14:56.861057+00:00Z"}
 {"action": "submit", "mode": "benchmark", "v": 93, "score": 76.305, "best": 71.98, "kept": false, "ts": "2026-03-20T14:22:28.376453+00:00Z"}
 {"action": "propose", "what": "Use non-persistent mode (mla_decode_fwd) with auto split selection, skip reduce for splits=1+fp8", "why": "Non-persistent mode for splits=1 with fp8 writes output directly to output buffer, skipping the reduce kernel entirely. For bs=256 this saves one kernel launch. The persistent mode always launches stage1+reduce even when splits=1.", "keywords": ["non_persistent", "splits1", "skip_reduce"], "prior_matches": 0, "ts": "2026-03-20T14:24:32.920396+00:00Z"}
+{"action": "submit", "mode": "test", "v": 94, "result": "pass", "ts": "2026-03-20T14:31:06.356634+00:00Z"}

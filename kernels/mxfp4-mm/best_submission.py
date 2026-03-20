@@ -2,10 +2,11 @@
 #!POPCORN gpu MI355X
 
 """
-v219: .wt on M=256 scale stores (from .cg).
+v220: cache_modifier=None for M=64 fused path (from .cg).
 
-M=256: .wt bypasses L1 write-allocate for scale stores, pushing data
-to L2 faster for ASM GEMM consumption. 25+ BM confirmations at -2 to -4%.
+For 64x7168x2048 with BSM=16 BSN=128 BSK=256: B data per block
+is 16KB FP4 per K-iter. Without .cg, L1 caches B tiles across
+4 K-iterations for potential reuse.
 """
 import torch
 import triton
@@ -121,7 +122,7 @@ def _get_fused_config(M, N, K):
             "num_stages": 2,
             "waves_per_eu": 2,
             "matrix_instr_nonkdim": 16,
-            "cache_modifier": ".cg",
+            "cache_modifier": None,
             "NUM_KSPLIT": 1,
         }
 
