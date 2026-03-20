@@ -8,9 +8,9 @@
    - Use `--override "reason this is different"` to proceed anyway
 4. Get next version: `V=$(./tools/next_version.sh)`. Edit submission.py, archive: `cp submission.py submissions/v${V}_description.py`
 5. `./tools/submit.sh test`
-6. `./tools/submit.sh leaderboard`
+6. `./tools/submit.sh benchmark`
 7. Output says KEEP or REVERT. Follow it.
-8. After a KEEP, run `./tools/leaderboard.sh` to see if you moved up. Use the gap to #1 to guide your next hypothesis.
+8. After a KEEP, run `./tools/leaderboard.sh` to check ranking. LB submissions are handled hourly by the orchestrator.
 9. Repeat from step 2, or if 5 reverts: `./tools/close_branch.sh`
 
 ## Rules
