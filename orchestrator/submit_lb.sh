@@ -57,6 +57,12 @@ print(k.get('bm_score', k.get('score', 999999)))
     RESULT=$(popcorn-cli submit --gpu MI355X --leaderboard "$LEADERBOARD" --mode leaderboard --no-tui best_submission.py 2>&1) || true
     echo "$RESULT"
 
+    # Check for submission failure
+    if echo "$RESULT" | grep -qi "failed\|error\|timeout\|unauthorized"; then
+        echo "[$kernel] LB submission FAILED — will retry next cycle"
+        continue
+    fi
+
     # Extract LB score if available
     LB_SCORE=$(echo "$RESULT" | python3 -c "
 import sys, re, math
@@ -85,7 +91,7 @@ geomean = math.exp(sum(math.log(t) for t in times_us) / len(times_us))
 print(f'{geomean:.3f}')
 " || echo "")
 
-    # Update last_lb.json
+    # Only update last_lb.json if submission succeeded
     python3 -c "
 import json, datetime
 lb = json.load(open('$LB_FILE'))
