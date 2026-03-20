@@ -1,2 +1,3 @@
 {"action": "propose", "what": "fp8 Q quantization for a8w8 path \u2014 use mla_a8w8 asm kernel instead of a16w8", "why": "a8w8 halves Q bandwidth, claw-kernel uses this for 76us", "keywords": ["a8w8", "fp8-q", "quantize"], "prior_matches": 0, "ts": "2026-03-20T13:03:47.008536+00:00Z"}
 {"action": "submit", "mode": "test", "v": 92, "result": "pass", "ts": "2026-03-20T13:09:37.288733+00:00Z"}
+{"action": "submit", "mode": "benchmark", "v": 92, "score": 71.98, "best": 75.73, "kept": true, "ts": "2026-03-20T13:16:51.825102+00:00Z"}

@@ -2,10 +2,9 @@
 #!POPCORN gpu MI355X
 
 """
-v138: Hybrid aiter-ASM + Triton MXFP4+FP8.
-- Small shapes (bs<=32, kv<=1024): aiter a8w8 ASM (precision-safe).
-- Large shapes: Triton MXFP4 K (dot_scaled) + FP8 V (fast path, ~18us).
-- Buffer/NSPLIT caching, fp8 scale loaded inside kernel.
+v138: Restore Triton MXFP4+FP8 kernel (from v123) — dot_scaled Q*K with MXFP4, FP8 V loads,
+adaptive NSPLIT (8/16), buffer+NSPLIT caching. Previously scored 18.09us.
+Triton kernel doesn't depend on broken aiter mla_decode_fwd API.
 """
 
 import torch
@@ -13,124 +12,16 @@ import triton
 import triton.language as tl
 from task import input_t, output_t
 
-from aiter import dtypes as aiter_dtypes
-from aiter import get_mla_metadata_info_v1, get_mla_metadata_v1
-from aiter import mla_decode_stage1_asm_fwd, mla_reduce_v1
-try:
-    from aiter import per_tensor_quant_hip
-except ImportError:
-    per_tensor_quant_hip = None
-
-FP8_DTYPE = aiter_dtypes.fp8
-
-# MLA constants
 NUM_HEADS = 16
-NUM_KV_HEADS = 1
-KV_LORA_RANK = 512
-QK_ROPE_HEAD_DIM = 64
-QK_HEAD_DIM = KV_LORA_RANK + QK_ROPE_HEAD_DIM  # 576
-V_HEAD_DIM = KV_LORA_RANK                       # 512
-SM_SCALE = 1.0 / (QK_HEAD_DIM ** 0.5)
-
+QK_HEAD_DIM = 576
+V_HEAD_DIM = 512
 QK_PAD = 1024
 PKD_PAD = 512
 NSC_PAD = 32
 
-NUM_KV_SPLITS_ASM = 32
-
-_asm_cache = {}
-_triton_buf_cache = {}
+_buf_cache = {}
 _nsplit_cache = {}
 
-
-# ==================== AITER ASM PATH (for small shapes) ====================
-
-def quantize_fp8(tensor: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    if per_tensor_quant_hip is not None:
-        fp8_tensor, scale = per_tensor_quant_hip(tensor, quant_dtype=FP8_DTYPE)
-        return fp8_tensor, scale.reshape(1)
-    finfo = torch.finfo(FP8_DTYPE)
-    amax = tensor.abs().amax().clamp(min=1e-12)
-    scale = amax / finfo.max
-    fp8_tensor = (tensor / scale).clamp(min=finfo.min, max=finfo.max).to(FP8_DTYPE)
-    return fp8_tensor, scale.to(torch.float32).reshape(1)
-
-
-def _build_asm_meta(batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr, kv_indptr, dtype_q, dtype_kv, num_kv_splits):
-    total_kv_len = batch_size * kv_seq_len
-    kv_indices = torch.arange(total_kv_len, dtype=torch.int32, device="cuda")
-    kv_last_page_len = (kv_indptr[1:] - kv_indptr[:-1]).to(torch.int32)
-
-    info = get_mla_metadata_info_v1(
-        batch_size, q_seq_len, NUM_HEADS, dtype_q, dtype_kv,
-        is_sparse=False, fast_mode=True,
-        num_kv_splits=num_kv_splits, intra_batch_mode=True,
-    )
-    work = [torch.empty(s, dtype=t, device="cuda") for s, t in info]
-    (work_metadata, work_indptr, work_info_set,
-     reduce_indptr, reduce_final_map, reduce_partial_map) = work
-
-    get_mla_metadata_v1(
-        qo_indptr, kv_indptr, kv_last_page_len,
-        NUM_HEADS // NUM_KV_HEADS, NUM_KV_HEADS, True,
-        work_metadata, work_info_set, work_indptr,
-        reduce_indptr, reduce_final_map, reduce_partial_map,
-        page_size=1, kv_granularity=16,
-        max_seqlen_qo=q_seq_len, uni_seqlen_qo=q_seq_len,
-        fast_mode=True, max_split_per_batch=num_kv_splits,
-        intra_batch_mode=True, dtype_q=dtype_q, dtype_kv=dtype_kv,
-    )
-
-    num_partials = reduce_partial_map.numel()
-    split_data = torch.empty((num_partials * q_seq_len, 1, NUM_HEADS, V_HEAD_DIM), dtype=torch.float32, device="cuda")
-    split_lse = torch.empty((num_partials * q_seq_len, 1, NUM_HEADS, 1), dtype=torch.float32, device="cuda")
-    output = torch.empty((q_total, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda")
-
-    return {
-        "work_meta_data": work_metadata, "work_indptr": work_indptr,
-        "work_info_set": work_info_set, "reduce_indptr": reduce_indptr,
-        "reduce_final_map": reduce_final_map, "reduce_partial_map": reduce_partial_map,
-        "split_data": split_data, "split_lse": split_lse, "output": output,
-        "kv_indices": kv_indices, "kv_last_page_len": kv_last_page_len,
-        "kv_indptr_use": kv_indptr,
-    }
-
-
-def _run_asm(q, kv_data, qo_indptr, kv_indptr, config):
-    batch_size = config["batch_size"]
-    kv_seq_len = config["kv_seq_len"]
-    q_seq_len = config.get("q_seq_len", 1)
-    q_total = q.shape[0]
-
-    kv_buffer_fp8, kv_scale = kv_data["fp8"]
-    q_fp8, q_scale = quantize_fp8(q.view(-1, NUM_HEADS, QK_HEAD_DIM))
-
-    key = ('a8w8', batch_size, q_seq_len, kv_seq_len)
-    if key not in _asm_cache:
-        _asm_cache[key] = _build_asm_meta(
-            batch_size, q_seq_len, kv_seq_len, q_total, qo_indptr, kv_indptr,
-            FP8_DTYPE, FP8_DTYPE, NUM_KV_SPLITS_ASM,
-        )
-    cached = _asm_cache[key]
-
-    kv_buffer_4d = kv_buffer_fp8.view(-1, 1, NUM_KV_HEADS, kv_buffer_fp8.shape[-1])
-    mla_decode_stage1_asm_fwd(
-        q_fp8, kv_buffer_4d, qo_indptr,
-        cached["kv_indptr_use"], cached["kv_indices"], cached["kv_last_page_len"],
-        None, cached["work_meta_data"], cached["work_indptr"], cached["work_info_set"],
-        q_seq_len, 1, NUM_KV_HEADS, SM_SCALE,
-        cached["split_data"], cached["split_lse"], cached["output"],
-        q_scale, kv_scale,
-    )
-    mla_reduce_v1(
-        cached["split_data"], cached["split_lse"],
-        cached["reduce_indptr"], cached["reduce_final_map"], cached["reduce_partial_map"],
-        q_seq_len, cached["output"], None,
-    )
-    return cached["output"]
-
-
-# ==================== TRITON MXFP4+FP8 PATH (for large shapes) ====================
 
 @triton.jit
 def _stage1(
@@ -173,6 +64,7 @@ def _stage1(
         tl.store(Mid_v + v_off + ov, tl.zeros([V_DIM], dtype=tl.bfloat16))
         return
 
+    # Load fp8 scale from device memory (avoids .item() CPU sync)
     fp8_scale = tl.load(FP8_SCALE_PTR).to(tl.float32)
 
     ok = tl.arange(0, QK_P)
@@ -212,7 +104,8 @@ def _stage1(
         acc_v = acc_v * alpha
 
         fp8_offsets = (kg[:, None] * FP8_STRIDE + ov[None, :]).to(tl.int64)
-        vfp8 = tl.load(KV_fp8 + fp8_offsets, mask=nm[:, None], other=0.0)
+        vfp8 = tl.load(KV_fp8 + fp8_offsets,
+                        mask=nm[:, None], other=0.0)
         v_f32 = vfp8.to(tl.float32) * fp8_scale
 
         acc_v += tl.sum(p[:, None] * v_f32, axis=0)
@@ -255,7 +148,8 @@ def _stage2(
     tl.store(O + o_base + ov, (acc * inv).to(tl.bfloat16))
 
 
-def _run_triton(q, kv_data, qo_indptr, kv_indptr, config):
+def custom_kernel(data: input_t) -> output_t:
+    q, kv_data, qo_indptr, kv_indptr, config = data
     bs = config["batch_size"]
     tq = q.shape[0]
 
@@ -269,12 +163,14 @@ def _run_triton(q, kv_data, qo_indptr, kv_indptr, config):
 
     kv_fp8_raw, kv_fp8_scale = kv_data["fp8"]
     kv_fp8 = kv_fp8_raw.view(torch.float8_e4m3fnuz).reshape(kv_fp8_raw.shape[0], -1)
+    # Pass scale tensor pointer to kernel (avoids .item() GPU-CPU sync)
     fp8_scale_tensor = kv_fp8_scale.view(-1)
 
     PKD = kv_pk.shape[-1]
     N_SC = kv_sc.shape[-1]
     FP8_STRIDE = kv_fp8.shape[-1]
 
+    # Cache NSPLIT decision — avoids kv_indptr .item() sync on repeated calls
     shape_key = (tq, bs)
     if shape_key in _nsplit_cache:
         NSPLIT = _nsplit_cache[shape_key]
@@ -283,15 +179,16 @@ def _run_triton(q, kv_data, qo_indptr, kv_indptr, config):
         NSPLIT = 8 if max_kv <= 2048 else 16
         _nsplit_cache[shape_key] = NSPLIT
 
+    # Cache intermediate buffers
     buf_key = (tq, NSPLIT)
-    if buf_key not in _triton_buf_cache:
+    if buf_key not in _buf_cache:
         n_mid_v = tq * NSPLIT * NUM_HEADS * V_HEAD_DIM
-        _triton_buf_cache[buf_key] = (
+        _buf_cache[buf_key] = (
             torch.empty(n_mid_v, dtype=torch.bfloat16, device="cuda"),
             torch.empty(tq * NSPLIT * NUM_HEADS, dtype=torch.float32, device="cuda"),
             torch.empty((tq, NUM_HEADS, V_HEAD_DIM), dtype=torch.bfloat16, device="cuda"),
         )
-    mid_v, mid_lse, o = _triton_buf_cache[buf_key]
+    mid_v, mid_lse, o = _buf_cache[buf_key]
 
     _stage1[(bs * NSPLIT * NUM_HEADS,)](
         q, kv_pk, kv_sc, kv_fp8,
@@ -313,18 +210,3 @@ def _run_triton(q, kv_data, qo_indptr, kv_indptr, config):
     )
 
     return o
-
-
-# ==================== DISPATCH ====================
-
-def custom_kernel(data: input_t) -> output_t:
-    q, kv_data, qo_indptr, kv_indptr, config = data
-    bs = config["batch_size"]
-    kv_seq_len = config["kv_seq_len"]
-
-    # Small shapes: aiter ASM for precision
-    # Large shapes: Triton MXFP4+FP8 for speed
-    if bs <= 32 and kv_seq_len <= 1024:
-        return _run_asm(q, kv_data, qo_indptr, kv_indptr, config)
-    else:
-        return _run_triton(q, kv_data, qo_indptr, kv_indptr, config)
