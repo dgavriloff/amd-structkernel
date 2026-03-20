@@ -157,7 +157,7 @@ for val, unit in entries:
         t *= 1000.0
     times_us.append(t)
 geomean = math.exp(sum(math.log(t) for t in times_us) / len(times_us))
-print(f'{geomean:.2f}')
+print(f'{geomean:.3f}')
 " || echo "")
 
     if [ -z "$SCORE" ]; then
