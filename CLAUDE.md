@@ -11,8 +11,12 @@ cd <KERNEL_DIR> && export AGENT_SESSION_ID=<ID>
 You are an AMD kernel optimization agent. Read the CLAUDE.md, then follow the workflow.
 
 ## Leaderboard Submissions
-Run `./orchestrator/submit_lb.sh` hourly (via `/loop 60m`).
-It checks each kernel's best BM score vs last LB submission and submits if improved.
+Run `./orchestrator/submit_lb.sh` every 65 minutes (via `/loop 65m`).
+It checks each kernel's best score vs last submission and submits if improved.
+
+After each LB run, check the latest log in each kernel's `state/logs/lb_*.log`:
+- **If the log contains `❌`**: Kill that kernel's agent. Do NOT relaunch. Alert the user.
+- **If the log shows success (✅)**: Do nothing. Let the agent keep running.
 
 ## Status
 Run `./orchestrator/status.sh` to see all kernels' current best scores.

@@ -62,59 +62,24 @@ print(k.get('bm_score', k.get('score', 999999)))
     mkdir -p "$LB_LOGS_DIR"
     echo "$RESULT" > "$LB_LOGS_DIR/lb_v${BM_VERSION}_$(date -u '+%Y%m%d_%H%M%S').log"
 
-    # Check for submission failure — match specific failure patterns, not generic "error"
-    # (server STDERR contains "error" in benign aiter log lines)
+    # Check for failure
     if echo "$RESULT" | grep -qiE "Application error:|Rate limit exceeded|❌ Benchmarking failed|❌ Testing failed|❌ Leaderboard run failed|Failed to trigger"; then
         echo "[$kernel] LB submission FAILED — will retry next cycle"
         continue
     fi
 
-    # Extract LB score if available
-    LB_SCORE=$(echo "$RESULT" | python3 -c "
-import sys, re, math
-text = sys.stdin.read()
-idx = text.find('Ranked Benchmark')
-if idx == -1: idx = text.find('ranked benchmark')
-if idx == -1: idx = text.find('Ranked benchmark')
-if idx == -1: idx = text.find('## Benchmarks:')
-if idx == -1: idx = text.find('Benchmarks:')
-if idx == -1:
-    print('')
-    sys.exit(0)
-ranked_section = text[idx:]
-entries = re.findall(r'⏱\s+([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', ranked_section)
-if not entries:
-    entries = re.findall(r'([0-9]+(?:\.[0-9]+)?)\s*±[^µm\n]*?(µs|ms)', ranked_section)
-if not entries:
-    print('')
-    sys.exit(0)
-times_us = []
-for val, unit in entries:
-    t = float(val)
-    if unit == 'ms': t *= 1000.0
-    times_us.append(t)
-geomean = math.exp(sum(math.log(t) for t in times_us) / len(times_us))
-print(f'{geomean:.3f}')
-" || echo "")
-
-    # Only update last_lb.json if submission succeeded
+    # Success — mark this version as submitted (no score parsing, leaderboard.sh reads the website)
     python3 -c "
 import json, datetime
 lb = json.load(open('$LB_FILE'))
 lb['$kernel'] = {
     'version': $BM_VERSION,
     'bm_score': float('$BM_SCORE'),
-    'lb_score': float('${LB_SCORE:-0}') if '${LB_SCORE:-}' else None,
     'ts': datetime.datetime.now(datetime.UTC).isoformat() + 'Z'
 }
 json.dump(lb, open('$LB_FILE', 'w'), indent=2)
 "
-
-    if [ -n "$LB_SCORE" ]; then
-        echo "[$kernel] LB submitted: v$BM_VERSION @ ${LB_SCORE}µs (LB)"
-    else
-        echo "[$kernel] LB submitted: v$BM_VERSION (could not parse LB score)"
-    fi
+    echo "[$kernel] LB submitted: v$BM_VERSION"
 done
 
 echo "=== Done ==="
