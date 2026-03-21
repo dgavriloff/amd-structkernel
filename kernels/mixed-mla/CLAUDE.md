@@ -14,7 +14,7 @@
 
 ## Pre-Submission Checklist
 
-Answer NO to all of these or your change will fail/regress on LB:
+Production eval calls `custom_kernel()` with **new random data every iteration** and checks correctness each time. Answer NO to all of these or your change will fail:
 
 ### Will it break?
 - [ ] **CUDA graphs?**
@@ -23,7 +23,7 @@ Answer NO to all of these or your change will fail/regress on LB:
 
 ### Will it regress?
 - [ ] **Improvement depends on same data running repeatedly?** — Cache line reuse, TLB warmth, allocator patterns all reset with new data. But this is usually small (1-5%).
-- [ ] **Relies on 100ms warmup?** — LB gets 10ms. Triton JIT and autotune need warmup; aiter ASM kernels don't.
+- [ ] **Relies on 100ms warmup?** — Production eval gets 10ms. Triton JIT and autotune need warmup; aiter ASM kernels don't.
 
 ### Quick self-test
 Imagine calling `custom_kernel()` 100 times with different random data each time. Is every output correct and roughly the same speed?
